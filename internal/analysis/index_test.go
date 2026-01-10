@@ -37,6 +37,40 @@ func TestVariablesAtOrder(t *testing.T) {
 	}
 }
 
+func TestVariablesAtListAndHash(t *testing.T) {
+	src := "sub foo { my @a = (1); my %h = (a => 1); @a; %h; }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+
+	beforeA := offsetOf(t, src, "my @a") + 1
+	vars := idx.VariablesAt(beforeA)
+	if containsVar(vars, "@a") {
+		t.Fatalf("did not expect @a before declaration")
+	}
+
+	afterA := offsetOf(t, src, "my @a") + len("my @a")
+	vars = idx.VariablesAt(afterA)
+	if !containsVar(vars, "@a") {
+		t.Fatalf("expected @a after declaration")
+	}
+
+	beforeH := offsetOf(t, src, "my %h") + 1
+	vars = idx.VariablesAt(beforeH)
+	if containsVar(vars, "%h") {
+		t.Fatalf("did not expect %%h before declaration")
+	}
+
+	afterH := offsetOf(t, src, "my %h") + len("my %h")
+	vars = idx.VariablesAt(afterH)
+	if !containsVar(vars, "%h") {
+		t.Fatalf("expected %%h after declaration")
+	}
+}
+
 func TestVariablesAtShadowing(t *testing.T) {
 	src := "my $x = 1; sub foo { my $x = 2; $x }"
 	doc := ppi.NewDocument(src)
