@@ -264,7 +264,8 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	def := findDefinition(doc.parsed.Root, name)
 	if def == nil {
 		pkg := doc.parsed.PackageAt(offset)
-		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI, pkg, qualified)
+		usePkgs := collectUsePackages(doc.parsed.Root)
+		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI, pkg, usePkgs, qualified)
 		if err != nil {
 			s.logger.Debug("definition lookup failed", "name", name, "error", err)
 			return nil, nil
@@ -594,6 +595,31 @@ func formatAttributes(attrs []ppi.AttrMeta) string {
 	return strings.Join(out, ", ")
 }
 
+func collectUsePackages(root *ppi.Node) []string {
+	if root == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	walkNodes(root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {
+			return
+		}
+		if strings.ToLower(n.Keyword) != "use" {
+			return
+		}
+		if n.Name == "" {
+			return
+		}
+		if _, ok := seen[n.Name]; ok {
+			return
+		}
+		seen[n.Name] = struct{}{}
+		out = append(out, n.Name)
+	})
+	return out
+}
+
 func nodeNameRange(text string, node *ppi.Node) (protocol.Range, bool) {
 	if node == nil || node.Name == "" {
 		return protocol.Range{}, false
@@ -916,7 +942,7 @@ func workspaceRoots(params *protocol.InitializeParams) []string {
 	return roots
 }
 
-func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri, pkg string, qualified bool) ([]analysis.Definition, error) {
+func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri, pkg string, usePkgs []string, qualified bool) ([]analysis.Definition, error) {
 	s.workspaceMu.RLock()
 	index := s.workspaceIndex
 	s.workspaceMu.RUnlock()
@@ -938,6 +964,14 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 
 	if pkg != "" {
 		full := pkg + "::" + name
+		defs := index.FindSubsFull(full, exclude)
+		if len(defs) > 0 {
+			return defs, nil
+		}
+	}
+
+	for _, usePkg := range usePkgs {
+		full := usePkg + "::" + name
 		defs := index.FindSubsFull(full, exclude)
 		if len(defs) > 0 {
 			return defs, nil
