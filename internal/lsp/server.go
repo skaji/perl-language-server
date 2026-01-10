@@ -607,7 +607,14 @@ func collectUseImports(root *ppi.Node) map[string]map[string]struct{} {
 		if strings.ToLower(n.Keyword) != "use" {
 			return
 		}
-		if n.Name == "" || len(n.ImportItems) == 0 {
+		if n.Name == "" {
+			return
+		}
+		items := n.ImportItems
+		if len(items) == 0 {
+			items = importItemsFromArgs(n.Args)
+		}
+		if len(items) == 0 {
 			return
 		}
 		set := out[n.Name]
@@ -615,7 +622,7 @@ func collectUseImports(root *ppi.Node) map[string]map[string]struct{} {
 			set = make(map[string]struct{})
 			out[n.Name] = set
 		}
-		for _, item := range n.ImportItems {
+		for _, item := range items {
 			name := normalizeImportName(item)
 			if name == "" {
 				continue
@@ -638,6 +645,25 @@ func normalizeImportName(item string) string {
 		return item[idx+2:]
 	}
 	return item
+}
+
+func importItemsFromArgs(tokens []ppi.Token) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+	var items []string
+	for _, tok := range tokens {
+		switch tok.Type {
+		case ppi.TokenWord:
+			items = append(items, tok.Value)
+		case ppi.TokenQuote:
+			name := strings.Trim(tok.Value, "\"'`")
+			if name != "" {
+				items = append(items, name)
+			}
+		}
+	}
+	return items
 }
 
 func filterUseImports(index *analysis.WorkspaceIndex, imports map[string]map[string]struct{}, exclude string) map[string]map[string]struct{} {
