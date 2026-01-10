@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	ppi "github.com/skaji/go-ppi"
+	"github.com/skaji/perl-language-server/internal/analysis"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 	"github.com/tliron/glsp/server"
@@ -54,6 +55,7 @@ type documentData struct {
 	text    string
 	version *protocol.UInteger
 	parsed  *ppi.Document
+	index   *analysis.Index
 }
 
 type documentStore struct {
@@ -67,6 +69,7 @@ func newDocumentStore() *documentStore {
 
 func (s *documentStore) set(uri string, text string, version *protocol.UInteger) *documentData {
 	parsed := parseDocument(text)
+	index := analysis.IndexDocument(parsed)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	doc := &documentData{
@@ -74,6 +77,7 @@ func (s *documentStore) set(uri string, text string, version *protocol.UInteger)
 		text:    text,
 		version: version,
 		parsed:  parsed,
+		index:   index,
 	}
 	s.docs[uri] = doc
 	return doc
@@ -263,7 +267,11 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 
 	offset := params.Position.IndexIn(doc.text)
 	prefix := completionPrefix(doc.text, offset)
-	items := completionItems(doc.parsed, prefix)
+	vars := []analysis.Symbol{}
+	if doc.index != nil {
+		vars = doc.index.VariablesAt(offset)
+	}
+	items := completionItems(doc.parsed, vars, prefix)
 	s.logger.Debug("completion resolved", "prefix", prefix, "count", len(items))
 
 	return protocol.CompletionList{
@@ -591,7 +599,7 @@ func isCompletionChar(ch byte) bool {
 	}
 }
 
-func completionItems(doc *ppi.Document, prefix string) []protocol.CompletionItem {
+func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) []protocol.CompletionItem {
 	if doc == nil || doc.Root == nil {
 		return nil
 	}
@@ -623,6 +631,10 @@ func completionItems(doc *ppi.Document, prefix string) []protocol.CompletionItem
 	}
 	for _, fn := range perlBuiltins() {
 		add(fn, protocol.CompletionItemKindFunction, "builtin")
+	}
+
+	for _, sym := range vars {
+		add(sym.Name, protocol.CompletionItemKindVariable, "var")
 	}
 
 	walkNodes(doc.Root, func(n *ppi.Node) {
