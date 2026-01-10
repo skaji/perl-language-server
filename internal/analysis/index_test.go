@@ -1,0 +1,109 @@
+package analysis
+
+import (
+	"testing"
+
+	ppi "github.com/skaji/go-ppi"
+)
+
+func TestVariablesAtOrder(t *testing.T) {
+	src := "sub foo { my $x = 1; my $y = 2; }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+
+	beforeX := offsetOf(t, src, "my $x") + 1
+	vars := idx.VariablesAt(beforeX)
+	if containsVar(vars, "$x") {
+		t.Fatalf("did not expect $x before declaration")
+	}
+
+	afterX := offsetOf(t, src, "my $x") + len("my $x")
+	vars = idx.VariablesAt(afterX)
+	if !containsVar(vars, "$x") {
+		t.Fatalf("expected $x after declaration")
+	}
+
+	beforeY := offsetOf(t, src, "my $y") + 1
+	vars = idx.VariablesAt(beforeY)
+	if containsVar(vars, "$y") {
+		t.Fatalf("did not expect $y before declaration")
+	}
+	if !containsVar(vars, "$x") {
+		t.Fatalf("expected $x before $y declaration")
+	}
+}
+
+func TestVariablesAtShadowing(t *testing.T) {
+	src := "my $x = 1; sub foo { my $x = 2; $x }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+
+	inside := offsetOf(t, src, "$x }") + 1
+	vars := idx.VariablesAt(inside)
+	sym, ok := findVar(vars, "$x")
+	if !ok {
+		t.Fatalf("expected $x inside sub")
+	}
+	if sym.Storage != "my" {
+		t.Fatalf("expected my $x inside sub, got %q", sym.Storage)
+	}
+}
+
+func TestVariablesAtOurInDocumentScope(t *testing.T) {
+	src := "our $g = 1; sub foo { $g }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+
+	inside := offsetOf(t, src, "$g }") + 1
+	vars := idx.VariablesAt(inside)
+	if !containsVar(vars, "$g") {
+		t.Fatalf("expected our $g to be visible inside sub")
+	}
+}
+
+func offsetOf(t *testing.T, src, needle string) int {
+	t.Helper()
+	idx := -1
+	if needle != "" {
+		idx = findIndex(src, needle)
+	}
+	if idx < 0 {
+		t.Fatalf("needle %q not found", needle)
+	}
+	return idx
+}
+
+func findIndex(src, needle string) int {
+	for i := 0; i+len(needle) <= len(src); i++ {
+		if src[i:i+len(needle)] == needle {
+			return i
+		}
+	}
+	return -1
+}
+
+func containsVar(vars []Symbol, name string) bool {
+	_, ok := findVar(vars, name)
+	return ok
+}
+
+func findVar(vars []Symbol, name string) (Symbol, bool) {
+	for _, sym := range vars {
+		if sym.Kind == SymbolVar && sym.Name == name {
+			return sym, true
+		}
+	}
+	return Symbol{}, false
+}
