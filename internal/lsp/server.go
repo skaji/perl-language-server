@@ -269,6 +269,10 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	name, qualified := qualifiedNameAt(doc.parsed.Tokens, tokenIdx)
 	def := findDefinition(doc.parsed.Root, name)
 	if def == nil {
+		if loc, ok := s.moduleLocation(name, params.TextDocument.URI); ok {
+			s.logger.Debug("definition resolved (module)", "name", name)
+			return []protocol.Location{loc}, nil
+		}
 		pkg := doc.parsed.PackageAt(offset)
 		useImports := collectUseImports(doc.parsed.Root)
 		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI, pkg, useImports, qualified)
@@ -1068,6 +1072,35 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 	return nil, nil
+}
+
+func (s *Server) moduleLocation(name string, uri protocol.DocumentUri) (protocol.Location, bool) {
+	s.workspaceMu.RLock()
+	index := s.workspaceIndex
+	s.workspaceMu.RUnlock()
+	if index == nil {
+		return protocol.Location{}, false
+	}
+	exclude := ""
+	if path, ok := uriToPath(uri); ok {
+		exclude = path
+	}
+	defs := index.FindPackages(name, exclude)
+	if len(defs) == 0 {
+		return protocol.Location{}, false
+	}
+	path := defs[0].File
+	if path == "" {
+		return protocol.Location{}, false
+	}
+	rng := protocol.Range{
+		Start: protocol.Position{Line: 0, Character: 0},
+		End:   protocol.Position{Line: 0, Character: 0},
+	}
+	return protocol.Location{
+		URI:   protocol.DocumentUri(fileURI(path)),
+		Range: rng,
+	}, true
 }
 
 func mapKeys(m map[string]map[string]struct{}) []string {
