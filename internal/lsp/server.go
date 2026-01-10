@@ -638,6 +638,7 @@ func normalizeImportName(item string) string {
 		return ""
 	}
 	item = strings.TrimPrefix(item, "&")
+	item = strings.Trim(item, "\"'`")
 	if item == "" {
 		return ""
 	}
