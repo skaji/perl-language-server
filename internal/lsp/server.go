@@ -641,6 +641,13 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) [
 			detail = sym.Storage + " var"
 		}
 		add(sym.Name, protocol.CompletionItemKindVariable, detail)
+
+		if strings.HasPrefix(sym.Name, "@") || strings.HasPrefix(sym.Name, "%") {
+			if strings.HasPrefix(prefix, "$") {
+				alt := "$" + sym.Name[1:]
+				add(alt, protocol.CompletionItemKindVariable, detail+" (sigil)")
+			}
+		}
 	}
 
 	walkNodes(doc.Root, func(n *ppi.Node) {
