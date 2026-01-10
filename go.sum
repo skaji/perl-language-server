@@ -24,6 +24,8 @@ github.com/segmentio/ksuid v1.0.4 h1:sBo2BdShXjmcugAMwjugoGUdUV0pcxY5mW4xKRn3v4c
 github.com/segmentio/ksuid v1.0.4/go.mod h1:/XUiZBD3kVx5SmUOl55voK5yeAbBNNIed+2O73XgrPE=
 github.com/skaji/glsp v0.0.0-20260107192625-dd9435c01989 h1:S8mdUm4GRQQ7iZeF9xkO5xnfkVkIROLmD14SWG9RsEI=
 github.com/skaji/glsp v0.0.0-20260107192625-dd9435c01989/go.mod h1:77hCjnkUCu4xAxQqQvuQz87dDyzmy1QDyCBNlRqKv1Y=
+github.com/skaji/go-ppi v0.0.2 h1:efaLdgX6dq7v9lSz3rHOVHnKvhX7Gc85r2znXpkzQ/M=
+github.com/skaji/go-ppi v0.0.2/go.mod h1:qmvLPvf53+Jzay0sK091kFjMkNX4Izl3AoMIC5xhAIc=
 github.com/sourcegraph/jsonrpc2 v0.2.0 h1:KjN/dC4fP6aN9030MZCJs9WQbTOjWHhrtKVpzzSrr/U=
 github.com/sourcegraph/jsonrpc2 v0.2.0/go.mod h1:ZafdZgk/axhT1cvZAPOhw+95nz2I/Ra5qMlU4gTRwIo=
 github.com/tliron/commonlog v0.2.21 h1:V1v+6opmzuOqDxxnxxM5RWtlHZmqZlDxkKeZGs6DpPg=
