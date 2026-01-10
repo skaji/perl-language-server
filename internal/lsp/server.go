@@ -27,6 +27,7 @@ func NewServer(logger *slog.Logger) *Server {
 		docs:   newDocumentStore(),
 		logger: logger,
 	}
+	s.logger.Debug("lsp server created", "name", lsName, "version", version)
 	s.handler = protocol.Handler{
 		Initialize:            s.initialize,
 		Initialized:           s.initialized,
@@ -41,6 +42,7 @@ func NewServer(logger *slog.Logger) *Server {
 }
 
 func (s *Server) RunStdio() error {
+	s.logger.Info("starting stdio server", "name", lsName, "version", version)
 	srv := server.NewServer(&s.handler, lsName, false)
 	return srv.RunStdio()
 }
@@ -95,6 +97,7 @@ func parseDocument(text string) *ppi.Document {
 }
 
 func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any, error) {
+	s.logger.Debug("initialize request")
 	capabilities := s.handler.CreateServerCapabilities()
 
 	syncKind := protocol.TextDocumentSyncKindFull
@@ -114,28 +117,33 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 }
 
 func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) error {
+	s.logger.Debug("initialized notification")
 	return nil
 }
 
 func (s *Server) shutdown(_ *glsp.Context) error {
+	s.logger.Debug("shutdown request")
 	protocol.SetTraceValue(protocol.TraceValueOff)
 	return nil
 }
 
 func (s *Server) setTrace(_ *glsp.Context, params *protocol.SetTraceParams) error {
+	s.logger.Debug("setTrace request", "value", params.Value)
 	protocol.SetTraceValue(params.Value)
 	return nil
 }
 
 func (s *Server) didOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
+	s.logger.Debug("didOpen", "uri", params.TextDocument.URI, "version", params.TextDocument.Version, "languageId", params.TextDocument.LanguageID)
 	version := toUIntegerPtr(params.TextDocument.Version)
 	doc := s.docs.set(string(params.TextDocument.URI), params.TextDocument.Text, version)
 	s.publishDiagnostics(context, params.TextDocument.URI, doc)
-	s.logger.Debug("document opened", "uri", params.TextDocument.URI)
+	s.logger.Debug("document opened", "uri", params.TextDocument.URI, "errors", len(doc.parsed.Errors))
 	return nil
 }
 
 func (s *Server) didChange(context *glsp.Context, params *protocol.DidChangeTextDocumentParams) error {
+	s.logger.Debug("didChange", "uri", params.TextDocument.URI, "version", params.TextDocument.Version, "changes", len(params.ContentChanges))
 	if len(params.ContentChanges) == 0 {
 		return nil
 	}
@@ -146,14 +154,14 @@ func (s *Server) didChange(context *glsp.Context, params *protocol.DidChangeText
 			version := toUIntegerPtr(params.TextDocument.Version)
 			doc := s.docs.set(uri, change.Text, version)
 			s.publishDiagnostics(context, params.TextDocument.URI, doc)
-			s.logger.Debug("document changed", "uri", params.TextDocument.URI)
+			s.logger.Debug("document changed", "uri", params.TextDocument.URI, "errors", len(doc.parsed.Errors))
 			return nil
 		case protocol.TextDocumentContentChangeEvent:
 			if change.Range == nil {
 				version := toUIntegerPtr(params.TextDocument.Version)
 				doc := s.docs.set(uri, change.Text, version)
 				s.publishDiagnostics(context, params.TextDocument.URI, doc)
-				s.logger.Debug("document changed", "uri", params.TextDocument.URI)
+				s.logger.Debug("document changed", "uri", params.TextDocument.URI, "errors", len(doc.parsed.Errors))
 				return nil
 			}
 		}
@@ -162,6 +170,7 @@ func (s *Server) didChange(context *glsp.Context, params *protocol.DidChangeText
 }
 
 func (s *Server) didClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
+	s.logger.Debug("didClose", "uri", params.TextDocument.URI)
 	s.docs.delete(string(params.TextDocument.URI))
 	s.publishDiagnostics(context, params.TextDocument.URI, nil)
 	s.logger.Debug("document closed", "uri", params.TextDocument.URI)
@@ -169,14 +178,17 @@ func (s *Server) didClose(context *glsp.Context, params *protocol.DidCloseTextDo
 }
 
 func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
+	s.logger.Debug("hover", "uri", params.TextDocument.URI, "line", params.Position.Line, "character", params.Position.Character)
 	doc, ok := s.docs.get(string(params.TextDocument.URI))
 	if !ok || doc.parsed == nil {
+		s.logger.Debug("hover skipped: no document")
 		return nil, nil
 	}
 
 	offset := params.Position.IndexIn(doc.text)
 	token := tokenAtOffset(doc.parsed.Tokens, offset)
 	if token == nil || isTriviaToken(token.Type) {
+		s.logger.Debug("hover skipped: no token")
 		return nil, nil
 	}
 
@@ -186,8 +198,10 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		content = fmt.Sprintf("%s: %s", token.Type, token.Value)
 	}
 	if content == "" {
+		s.logger.Debug("hover skipped: empty content")
 		return nil, nil
 	}
+	s.logger.Debug("hover resolved", "token", token.Value, "type", token.Type, "node", node.Kind)
 
 	rng := tokenRange(doc.text, token)
 	return &protocol.Hover{
@@ -438,7 +452,7 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 			Diagnostics: diagnostics,
 		})
 	}
-	s.logger.Debug("diagnostics published", "uri", uri, "count", len(diagnostics))
+	s.logger.Debug("diagnostics published", "uri", uri, "count", len(diagnostics), "version", version)
 
 	_ = protocol.PublishDiagnosticsParams{
 		URI:         uri,
