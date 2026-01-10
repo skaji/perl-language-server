@@ -17,15 +17,17 @@ type Definition struct {
 }
 
 type WorkspaceIndex struct {
-	Packages map[string][]Definition
-	Subs     map[string][]Definition
-	Files    int
+	Packages   map[string][]Definition
+	SubsByName map[string][]Definition
+	SubsByFull map[string][]Definition
+	Files      int
 }
 
 func BuildWorkspaceIndex(roots []string) (*WorkspaceIndex, error) {
 	index := &WorkspaceIndex{
-		Packages: make(map[string][]Definition),
-		Subs:     make(map[string][]Definition),
+		Packages:   make(map[string][]Definition),
+		SubsByName: make(map[string][]Definition),
+		SubsByFull: make(map[string][]Definition),
 	}
 	for _, root := range roots {
 		if root == "" {
@@ -62,7 +64,11 @@ func (w *WorkspaceIndex) FindPackages(name string, exclude string) []Definition 
 }
 
 func (w *WorkspaceIndex) FindSubs(name string, exclude string) []Definition {
-	return filterDefinitions(w.Subs[name], exclude)
+	return filterDefinitions(w.SubsByName[name], exclude)
+}
+
+func (w *WorkspaceIndex) FindSubsFull(name string, exclude string) []Definition {
+	return filterDefinitions(w.SubsByFull[name], exclude)
 }
 
 func filterDefinitions(defs []Definition, exclude string) []Definition {
@@ -96,7 +102,13 @@ func indexFile(path string, w *WorkspaceIndex) error {
 		case SymbolPackage:
 			w.Packages[def.Name] = append(w.Packages[def.Name], def)
 		case SymbolSub:
-			w.Subs[def.Name] = append(w.Subs[def.Name], def)
+			pkg := doc.PackageAt(def.Start)
+			full := def.Name
+			if pkg != "" {
+				full = pkg + "::" + def.Name
+			}
+			w.SubsByName[def.Name] = append(w.SubsByName[def.Name], def)
+			w.SubsByFull[full] = append(w.SubsByFull[full], def)
 		}
 	}
 	return nil

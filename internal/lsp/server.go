@@ -204,8 +204,13 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}
 
 	offset := params.Position.IndexIn(doc.text)
-	token := tokenAtOffset(doc.parsed.Tokens, offset)
-	if token == nil || isTriviaToken(token.Type) {
+	tokenIdx := tokenIndexAtOffset(doc.parsed.Tokens, offset)
+	if tokenIdx < 0 {
+		s.logger.Debug("hover skipped: no token")
+		return nil, nil
+	}
+	token := doc.parsed.Tokens[tokenIdx]
+	if isTriviaToken(token.Type) {
 		s.logger.Debug("hover skipped: no token")
 		return nil, nil
 	}
@@ -221,7 +226,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}
 	s.logger.Debug("hover resolved", "token", token.Value, "type", token.Type, "node", node.Kind)
 
-	rng := tokenRange(doc.text, token)
+	rng := tokenRange(doc.text, &token)
 	return &protocol.Hover{
 		Contents: protocol.MarkupContent{
 			Kind:  protocol.MarkupKindMarkdown,
@@ -240,8 +245,13 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	}
 
 	offset := params.Position.IndexIn(doc.text)
-	token := tokenAtOffset(doc.parsed.Tokens, offset)
-	if token == nil || isTriviaToken(token.Type) {
+	tokenIdx := tokenIndexAtOffset(doc.parsed.Tokens, offset)
+	if tokenIdx < 0 {
+		s.logger.Debug("definition skipped: no token")
+		return nil, nil
+	}
+	token := doc.parsed.Tokens[tokenIdx]
+	if isTriviaToken(token.Type) {
 		s.logger.Debug("definition skipped: no token")
 		return nil, nil
 	}
@@ -250,10 +260,11 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		return nil, nil
 	}
 
-	name := token.Value
+	name, qualified := qualifiedNameAt(doc.parsed.Tokens, tokenIdx)
 	def := findDefinition(doc.parsed.Root, name)
 	if def == nil {
-		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI)
+		pkg := doc.parsed.PackageAt(offset)
+		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI, pkg, qualified)
 		if err != nil {
 			s.logger.Debug("definition lookup failed", "name", name, "error", err)
 			return nil, nil
@@ -318,14 +329,14 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	}, nil
 }
 
-func tokenAtOffset(tokens []ppi.Token, offset int) *ppi.Token {
+func tokenIndexAtOffset(tokens []ppi.Token, offset int) int {
 	for i := range tokens {
 		tok := &tokens[i]
 		if offset >= tok.Start && offset < tok.End {
-			return tok
+			return i
 		}
 	}
-	return nil
+	return -1
 }
 
 func tokenAtStart(tokens []ppi.Token, start int) *ppi.Token {
@@ -336,6 +347,38 @@ func tokenAtStart(tokens []ppi.Token, start int) *ppi.Token {
 		}
 	}
 	return nil
+}
+
+func qualifiedNameAt(tokens []ppi.Token, idx int) (string, bool) {
+	if idx < 0 || idx >= len(tokens) {
+		return "", false
+	}
+	token := tokens[idx]
+	if token.Type != ppi.TokenWord {
+		return token.Value, false
+	}
+	if strings.Contains(token.Value, "::") {
+		return token.Value, true
+	}
+	parts := []string{token.Value}
+	for i := idx - 1; i >= 1; i -= 2 {
+		if tokens[i].Type == ppi.TokenOperator && tokens[i].Value == "::" && tokens[i-1].Type == ppi.TokenWord {
+			parts = append([]string{tokens[i-1].Value}, parts...)
+			continue
+		}
+		break
+	}
+	for i := idx + 1; i+1 < len(tokens); i += 2 {
+		if tokens[i].Type == ppi.TokenOperator && tokens[i].Value == "::" && tokens[i+1].Type == ppi.TokenWord {
+			parts = append(parts, tokens[i+1].Value)
+			continue
+		}
+		break
+	}
+	if len(parts) == 1 {
+		return parts[0], false
+	}
+	return strings.Join(parts, "::"), true
 }
 
 func isTriviaToken(t ppi.TokenType) bool {
@@ -873,7 +916,7 @@ func workspaceRoots(params *protocol.InitializeParams) []string {
 	return roots
 }
 
-func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri) ([]analysis.Definition, error) {
+func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri, pkg string, qualified bool) ([]analysis.Definition, error) {
 	s.workspaceMu.RLock()
 	index := s.workspaceIndex
 	s.workspaceMu.RUnlock()
@@ -885,13 +928,22 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri)
 		exclude = path
 	}
 
-	if strings.Contains(name, "::") {
+	if qualified || strings.Contains(name, "::") {
 		defs := index.FindPackages(name, exclude)
 		if len(defs) > 0 {
 			return defs, nil
 		}
-		return index.FindSubs(name, exclude), nil
+		return index.FindSubsFull(name, exclude), nil
 	}
+
+	if pkg != "" {
+		full := pkg + "::" + name
+		defs := index.FindSubsFull(full, exclude)
+		if len(defs) > 0 {
+			return defs, nil
+		}
+	}
+
 	defs := index.FindSubs(name, exclude)
 	if len(defs) > 0 {
 		return defs, nil

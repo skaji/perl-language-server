@@ -29,3 +29,5 @@ require (
 )
 
 replace github.com/tliron/glsp => github.com/skaji/glsp v0.0.0-20260107192625-dd9435c01989
+
+replace github.com/skaji/go-ppi => ./go-ppi
