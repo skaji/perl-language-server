@@ -15,10 +15,11 @@ const (
 )
 
 type Symbol struct {
-	Name  string
-	Kind  SymbolKind
-	Start int
-	End   int
+	Name    string
+	Kind    SymbolKind
+	Storage string
+	Start   int
+	End     int
 }
 
 type Scope struct {
@@ -27,6 +28,7 @@ type Scope struct {
 	End      int
 	Symbols  []Symbol
 	Children []*Scope
+	Parent   *Scope
 }
 
 type Index struct {
@@ -46,8 +48,8 @@ func IndexDocument(doc *ppi.Document) *Index {
 	}
 	index := &Index{Root: root}
 
-	subScopes := buildSubScopes(doc.Root)
-	root.Children = append(root.Children, subScopes...)
+	scopes := buildScopes(doc.Root, root)
+	root.Children = scopes
 
 	collectDefinitions(doc.Root, index)
 	collectVariables(doc, root)
@@ -63,7 +65,7 @@ func (idx *Index) VariablesAt(offset int) []Symbol {
 	if scope == nil {
 		return nil
 	}
-	return scope.Symbols
+	return collectVisibleSymbols(scope)
 }
 
 func collectDefinitions(node *ppi.Node, idx *Index) {
@@ -96,15 +98,18 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 		return
 	}
 	activeDecl := false
+	declKind := ""
 	for _, tok := range tokens {
 		if tok.Type == ppi.TokenWord {
 			switch strings.ToLower(tok.Value) {
 			case "my", "our", "state":
 				activeDecl = true
+				declKind = strings.ToLower(tok.Value)
 			}
 		}
 		if tok.Type == ppi.TokenOperator && tok.Value == ";" {
 			activeDecl = false
+			declKind = ""
 			continue
 		}
 		if !activeDecl {
@@ -112,13 +117,17 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 		}
 		if tok.Type == ppi.TokenSymbol {
 			sym := Symbol{
-				Name:  tok.Value,
-				Kind:  SymbolVar,
-				Start: tok.Start,
-				End:   tok.End,
+				Name:    tok.Value,
+				Kind:    SymbolVar,
+				Storage: declKind,
+				Start:   tok.Start,
+				End:     tok.End,
 			}
 			scope := scopeForOffset(root, tok.Start)
 			if scope == nil {
+				scope = root
+			}
+			if declKind == "our" {
 				scope = root
 			}
 			scope.Symbols = append(scope.Symbols, sym)
@@ -126,23 +135,38 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 	}
 }
 
-func buildSubScopes(root *ppi.Node) []*Scope {
+func buildScopes(root *ppi.Node, parent *Scope) []*Scope {
 	var scopes []*Scope
 	walkNodes(root, func(n *ppi.Node) {
-		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+		if n == nil {
 			return
 		}
-		start, end, ok := nodeTokenRange(n)
-		if !ok {
-			return
+		switch {
+		case n.Type == ppi.NodeStatement && n.Kind == "statement::sub":
+			start, end, ok := nodeTokenRange(n)
+			if !ok {
+				return
+			}
+			scopes = append(scopes, &Scope{
+				Kind:  "sub",
+				Start: start,
+				End:   end,
+			})
+		case n.Type == ppi.NodeBlock:
+			start, end, ok := nodeTokenRange(n)
+			if !ok {
+				return
+			}
+			scopes = append(scopes, &Scope{
+				Kind:  "block",
+				Start: start,
+				End:   end,
+			})
 		}
-		scopes = append(scopes, &Scope{
-			Kind:  "sub",
-			Start: start,
-			End:   end,
-		})
 	})
-	return scopes
+
+	nestScopes(parent, scopes)
+	return parent.Children
 }
 
 func scopeForOffset(scope *Scope, offset int) *Scope {
@@ -158,6 +182,45 @@ func scopeForOffset(scope *Scope, offset int) *Scope {
 		}
 	}
 	return scope
+}
+
+func nestScopes(root *Scope, scopes []*Scope) {
+	// Assign scopes to the smallest parent that contains them.
+	for _, scope := range scopes {
+		scope.Parent = root
+	}
+	for _, scope := range scopes {
+		parent := root
+		for _, candidate := range scopes {
+			if candidate == scope {
+				continue
+			}
+			if candidate.Start <= scope.Start && candidate.End >= scope.End {
+				if parent == root || (candidate.End-candidate.Start) < (parent.End-parent.Start) {
+					parent = candidate
+				}
+			}
+		}
+		scope.Parent = parent
+	}
+	for _, scope := range scopes {
+		scope.Parent.Children = append(scope.Parent.Children, scope)
+	}
+}
+
+func collectVisibleSymbols(scope *Scope) []Symbol {
+	seen := make(map[string]struct{})
+	var out []Symbol
+	for cur := scope; cur != nil; cur = cur.Parent {
+		for _, sym := range cur.Symbols {
+			if _, ok := seen[sym.Name]; ok {
+				continue
+			}
+			seen[sym.Name] = struct{}{}
+			out = append(out, sym)
+		}
+	}
+	return out
 }
 
 func walkNodes(node *ppi.Node, fn func(*ppi.Node)) {

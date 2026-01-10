@@ -634,7 +634,11 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) [
 	}
 
 	for _, sym := range vars {
-		add(sym.Name, protocol.CompletionItemKindVariable, "var")
+		detail := "var"
+		if sym.Storage != "" {
+			detail = sym.Storage + " var"
+		}
+		add(sym.Name, protocol.CompletionItemKindVariable, detail)
 	}
 
 	walkNodes(doc.Root, func(n *ppi.Node) {
