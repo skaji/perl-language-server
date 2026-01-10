@@ -38,6 +38,7 @@ func NewServer(logger *slog.Logger) *Server {
 		TextDocumentDidClose:   s.didClose,
 		TextDocumentHover:      s.hover,
 		TextDocumentDefinition: s.definition,
+		TextDocumentCompletion: s.completion,
 	}
 	return s
 }
@@ -108,6 +109,7 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 	}
 	capabilities.HoverProvider = true
 	capabilities.DefinitionProvider = true
+	capabilities.CompletionProvider = &protocol.CompletionOptions{}
 
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
@@ -249,6 +251,25 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	}
 	s.logger.Debug("definition resolved", "name", name, "kind", def.Kind)
 	return []protocol.Location{loc}, nil
+}
+
+func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
+	s.logger.Debug("completion", "uri", params.TextDocument.URI, "line", params.Position.Line, "character", params.Position.Character)
+	doc, ok := s.docs.get(string(params.TextDocument.URI))
+	if !ok || doc.parsed == nil {
+		s.logger.Debug("completion skipped: no document")
+		return nil, nil
+	}
+
+	offset := params.Position.IndexIn(doc.text)
+	prefix := completionPrefix(doc.text, offset)
+	items := completionItems(doc.parsed, prefix)
+	s.logger.Debug("completion resolved", "prefix", prefix, "count", len(items))
+
+	return protocol.CompletionList{
+		IsIncomplete: false,
+		Items:        items,
+	}, nil
 }
 
 func tokenAtOffset(tokens []ppi.Token, offset int) *ppi.Token {
@@ -534,6 +555,146 @@ func needsSpace(prev string, cur string) bool {
 		return false
 	}
 	return true
+}
+
+func completionPrefix(text string, offset int) string {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(text) {
+		offset = len(text)
+	}
+	start := offset
+	for start > 0 {
+		ch := text[start-1]
+		if isCompletionChar(ch) {
+			start--
+			continue
+		}
+		break
+	}
+	return text[start:offset]
+}
+
+func isCompletionChar(ch byte) bool {
+	switch {
+	case ch >= 'a' && ch <= 'z':
+		return true
+	case ch >= 'A' && ch <= 'Z':
+		return true
+	case ch >= '0' && ch <= '9':
+		return true
+	case ch == '_' || ch == ':' || ch == '$' || ch == '@' || ch == '%':
+		return true
+	default:
+		return false
+	}
+}
+
+func completionItems(doc *ppi.Document, prefix string) []protocol.CompletionItem {
+	if doc == nil || doc.Root == nil {
+		return nil
+	}
+	items := make([]protocol.CompletionItem, 0)
+	seen := make(map[string]protocol.CompletionItemKind)
+
+	add := func(label string, kind protocol.CompletionItemKind, detail string) {
+		if label == "" {
+			return
+		}
+		if !strings.HasPrefix(label, prefix) {
+			return
+		}
+		if _, ok := seen[label]; ok {
+			return
+		}
+		seen[label] = kind
+		k := kind
+		d := detail
+		items = append(items, protocol.CompletionItem{
+			Label:  label,
+			Kind:   &k,
+			Detail: &d,
+		})
+	}
+
+	for _, kw := range perlKeywords() {
+		add(kw, protocol.CompletionItemKindKeyword, "keyword")
+	}
+	for _, fn := range perlBuiltins() {
+		add(fn, protocol.CompletionItemKindFunction, "builtin")
+	}
+
+	walkNodes(doc.Root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement {
+			return
+		}
+		switch n.Kind {
+		case "statement::sub":
+			add(n.Name, protocol.CompletionItemKindFunction, "sub")
+		case "statement::package":
+			add(n.Name, protocol.CompletionItemKindModule, "package")
+		}
+	})
+
+	return items
+}
+
+func perlKeywords() []string {
+	return []string{
+		"sub", "package", "use", "require", "my", "our", "state", "local",
+		"if", "elsif", "else", "unless", "while", "until", "for", "foreach",
+		"given", "when", "default", "continue", "do", "eval",
+		"last", "next", "redo", "goto", "return",
+		"BEGIN", "CHECK", "INIT", "END",
+	}
+}
+
+func perlBuiltins() []string {
+	return []string{
+		"abs", "accept", "alarm", "atan2", "bind", "binmode", "bless", "caller",
+		"chdir", "chmod", "chomp", "chop", "chown", "chr", "chroot", "close",
+		"closedir", "connect", "cos", "crypt", "dbmclose", "dbmopen", "defined",
+		"delete", "die", "do", "dump", "each", "endgrent", "endhostent",
+		"endnetent", "endprotoent", "endpwent", "endservent", "eof", "eval",
+		"exec", "exists", "exit", "exp", "fcntl", "fileno", "flock", "fork",
+		"format", "formline", "getc", "getgrent", "getgrgid", "getgrnam",
+		"gethostbyaddr", "gethostbyname", "gethostent", "getlogin",
+		"getnetbyaddr", "getnetbyname", "getnetent", "getpeername",
+		"getpgrp", "getppid", "getpriority", "getprotobyname",
+		"getprotobynumber", "getprotoent", "getpwent", "getpwnam",
+		"getpwuid", "getservbyname", "getservbyport", "getservent",
+		"getsockname", "getsockopt", "glob", "gmtime", "goto", "grep",
+		"hex", "index", "int", "ioctl", "join", "keys", "kill", "last",
+		"lc", "lcfirst", "length", "link", "listen", "local", "localtime",
+		"log", "lstat", "map", "mkdir", "msgctl", "msgget", "msgrcv",
+		"msgsnd", "my", "next", "oct", "open", "opendir", "ord", "pack",
+		"pipe", "pop", "pos", "print", "printf", "prototype", "push",
+		"quotemeta", "rand", "read", "readdir", "readline", "readlink",
+		"readpipe", "recv", "redo", "ref", "rename", "require", "reset",
+		"return", "reverse", "rewinddir", "rindex", "rmdir", "say", "scalar",
+		"seek", "seekdir", "select", "semctl", "semget", "semop", "send",
+		"setgrent", "sethostent", "setnetent", "setpgrp", "setpriority",
+		"setprotoent", "setpwent", "setservent", "setsockopt", "shift",
+		"shmctl", "shmget", "shmread", "shmwrite", "shutdown", "sin",
+		"sleep", "socket", "socketpair", "sort", "splice", "split", "sprintf",
+		"srand", "stat", "state", "study", "substr", "symlink", "syscall",
+		"sysopen", "sysread", "sysseek", "system", "syswrite", "tell",
+		"telldir", "tie", "tied", "time", "times", "truncate", "uc",
+		"ucfirst", "umask", "undef", "unlink", "unpack", "unshift", "untie",
+		"utime", "values", "vec", "wait", "waitpid", "wantarray", "warn",
+		"write",
+	}
+}
+
+func walkNodes(node *ppi.Node, fn func(*ppi.Node)) {
+	if node == nil {
+		return
+	}
+	fn(node)
+	for _, child := range node.Children {
+		walkNodes(child, fn)
+	}
 }
 
 func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.DocumentUri, doc *documentData) {
