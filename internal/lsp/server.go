@@ -962,7 +962,7 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		return index.FindSubsFull(name, exclude), nil
 	}
 
-	if pkg != "" {
+	if pkg != "" && pkg != "main" {
 		full := pkg + "::" + name
 		defs := index.FindSubsFull(full, exclude)
 		if len(defs) > 0 {
@@ -978,7 +978,7 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 
-	if len(usePkgs) == 0 && pkg == "" {
+	if len(usePkgs) == 0 && (pkg == "" || pkg == "main") {
 		return nil, nil
 	}
 	defs := index.FindSubs(name, exclude)
