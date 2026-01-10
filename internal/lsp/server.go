@@ -974,20 +974,21 @@ func toUIntegerPtr(version protocol.Integer) *protocol.UInteger {
 
 func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 	roots := workspaceRoots(params)
+	baseRoots := defaultLibRoots(roots)
 	incRoots, err := perlINCPaths()
 	if err != nil {
 		s.logger.Debug("perl @INC lookup failed", "error", err)
 	}
 
 	s.workspaceMu.Lock()
-	s.workspaceRoots = roots
+	s.workspaceRoots = baseRoots
 	s.incRoots = incRoots
 	if s.extraRoots == nil {
 		s.extraRoots = make(map[string]struct{})
 	}
 	s.workspaceMu.Unlock()
 
-	merged := uniqueStrings(append(append([]string{}, roots...), incRoots...))
+	merged := uniqueStrings(append(append([]string{}, baseRoots...), incRoots...))
 	if len(merged) == 0 {
 		s.logger.Debug("workspace index skipped: no roots")
 		return
@@ -1024,6 +1025,18 @@ func workspaceRoots(params *protocol.InitializeParams) []string {
 		roots = append(roots, *params.RootPath)
 	}
 	return roots
+}
+
+func defaultLibRoots(roots []string) []string {
+	var out []string
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		out = append(out, filepath.Join(root, "lib"))
+		out = append(out, filepath.Join(root, "local", "lib", "perl5"))
+	}
+	return out
 }
 
 func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri, pkg string, useImports map[string]map[string]struct{}, qualified bool) ([]analysis.Definition, error) {
