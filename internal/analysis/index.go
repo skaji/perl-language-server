@@ -65,7 +65,7 @@ func (idx *Index) VariablesAt(offset int) []Symbol {
 	if scope == nil {
 		return nil
 	}
-	return collectVisibleSymbols(scope)
+	return collectVisibleSymbols(scope, offset)
 }
 
 func collectDefinitions(node *ppi.Node, idx *Index) {
@@ -208,11 +208,14 @@ func nestScopes(root *Scope, scopes []*Scope) {
 	}
 }
 
-func collectVisibleSymbols(scope *Scope) []Symbol {
+func collectVisibleSymbols(scope *Scope, offset int) []Symbol {
 	seen := make(map[string]struct{})
 	var out []Symbol
 	for cur := scope; cur != nil; cur = cur.Parent {
 		for _, sym := range cur.Symbols {
+			if sym.Start > offset {
+				continue
+			}
 			if _, ok := seen[sym.Name]; ok {
 				continue
 			}
