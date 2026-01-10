@@ -978,6 +978,9 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 
+	if len(usePkgs) == 0 && pkg == "" {
+		return nil, nil
+	}
 	defs := index.FindSubs(name, exclude)
 	if len(defs) > 0 {
 		return defs, nil
