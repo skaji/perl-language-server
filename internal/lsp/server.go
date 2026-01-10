@@ -264,8 +264,8 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	def := findDefinition(doc.parsed.Root, name)
 	if def == nil {
 		pkg := doc.parsed.PackageAt(offset)
-		usePkgs := collectUsePackages(doc.parsed.Root)
-		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI, pkg, usePkgs, qualified)
+		useImports := collectUseImports(doc.parsed.Root)
+		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI, pkg, useImports, qualified)
 		if err != nil {
 			s.logger.Debug("definition lookup failed", "name", name, "error", err)
 			return nil, nil
@@ -595,12 +595,11 @@ func formatAttributes(attrs []ppi.AttrMeta) string {
 	return strings.Join(out, ", ")
 }
 
-func collectUsePackages(root *ppi.Node) []string {
+func collectUseImports(root *ppi.Node) map[string]map[string]struct{} {
 	if root == nil {
 		return nil
 	}
-	seen := make(map[string]struct{})
-	var out []string
+	out := make(map[string]map[string]struct{})
 	walkNodes(root, func(n *ppi.Node) {
 		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {
 			return
@@ -608,36 +607,52 @@ func collectUsePackages(root *ppi.Node) []string {
 		if strings.ToLower(n.Keyword) != "use" {
 			return
 		}
-		if n.Name == "" {
+		if n.Name == "" || len(n.ImportItems) == 0 {
 			return
 		}
-		if _, ok := seen[n.Name]; ok {
-			return
+		set := out[n.Name]
+		if set == nil {
+			set = make(map[string]struct{})
+			out[n.Name] = set
 		}
-		seen[n.Name] = struct{}{}
-		out = append(out, n.Name)
+		for _, item := range n.ImportItems {
+			name := normalizeImportName(item)
+			if name == "" {
+				continue
+			}
+			set[name] = struct{}{}
+		}
 	})
 	return out
 }
 
-func filterUsePackages(index *analysis.WorkspaceIndex, pkgs []string, exclude string) []string {
-	if index == nil || len(pkgs) == 0 {
+func normalizeImportName(item string) string {
+	if item == "" {
+		return ""
+	}
+	item = strings.TrimPrefix(item, "&")
+	if item == "" {
+		return ""
+	}
+	if idx := strings.LastIndex(item, "::"); idx >= 0 {
+		return item[idx+2:]
+	}
+	return item
+}
+
+func filterUseImports(index *analysis.WorkspaceIndex, imports map[string]map[string]struct{}, exclude string) map[string]map[string]struct{} {
+	if index == nil || len(imports) == 0 {
 		return nil
 	}
-	out := make([]string, 0, len(pkgs))
-	seen := make(map[string]struct{})
-	for _, name := range pkgs {
-		if name == "" {
-			continue
-		}
-		if _, ok := seen[name]; ok {
+	out := make(map[string]map[string]struct{})
+	for name, symbols := range imports {
+		if name == "" || len(symbols) == 0 {
 			continue
 		}
 		if len(index.FindPackages(name, exclude)) == 0 {
 			continue
 		}
-		seen[name] = struct{}{}
-		out = append(out, name)
+		out[name] = symbols
 	}
 	return out
 }
@@ -964,7 +979,7 @@ func workspaceRoots(params *protocol.InitializeParams) []string {
 	return roots
 }
 
-func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri, pkg string, usePkgs []string, qualified bool) ([]analysis.Definition, error) {
+func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri, pkg string, useImports map[string]map[string]struct{}, qualified bool) ([]analysis.Definition, error) {
 	s.workspaceMu.RLock()
 	index := s.workspaceIndex
 	s.workspaceMu.RUnlock()
@@ -992,23 +1007,21 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 
-	filteredUsePkgs := filterUsePackages(index, usePkgs, exclude)
-	for _, usePkg := range filteredUsePkgs {
+	filteredUseImports := filterUseImports(index, useImports, exclude)
+	if len(filteredUseImports) == 0 && (pkg == "" || pkg == "main") {
+		return nil, nil
+	}
+	for usePkg, symbols := range filteredUseImports {
+		if _, ok := symbols[name]; !ok {
+			continue
+		}
 		full := usePkg + "::" + name
 		defs := index.FindSubsFull(full, exclude)
 		if len(defs) > 0 {
 			return defs, nil
 		}
 	}
-
-	if len(filteredUsePkgs) == 0 && (pkg == "" || pkg == "main") {
-		return nil, nil
-	}
-	defs := index.FindSubs(name, exclude)
-	if len(defs) > 0 {
-		return defs, nil
-	}
-	return index.FindPackages(name, exclude), nil
+	return nil, nil
 }
 
 func rangeFromFile(path string, start int, end int) (protocol.Range, bool) {
