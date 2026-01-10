@@ -29,14 +29,15 @@ func NewServer(logger *slog.Logger) *Server {
 	}
 	s.logger.Debug("lsp server created", "name", lsName, "version", version)
 	s.handler = protocol.Handler{
-		Initialize:            s.initialize,
-		Initialized:           s.initialized,
-		Shutdown:              s.shutdown,
-		SetTrace:              s.setTrace,
-		TextDocumentDidOpen:   s.didOpen,
-		TextDocumentDidChange: s.didChange,
-		TextDocumentDidClose:  s.didClose,
-		TextDocumentHover:     s.hover,
+		Initialize:             s.initialize,
+		Initialized:            s.initialized,
+		Shutdown:               s.shutdown,
+		SetTrace:               s.setTrace,
+		TextDocumentDidOpen:    s.didOpen,
+		TextDocumentDidChange:  s.didChange,
+		TextDocumentDidClose:   s.didClose,
+		TextDocumentHover:      s.hover,
+		TextDocumentDefinition: s.definition,
 	}
 	return s
 }
@@ -106,6 +107,7 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 		Change:    &syncKind,
 	}
 	capabilities.HoverProvider = true
+	capabilities.DefinitionProvider = true
 
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
@@ -213,10 +215,56 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}, nil
 }
 
+func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
+	s.logger.Debug("definition", "uri", params.TextDocument.URI, "line", params.Position.Line, "character", params.Position.Character)
+	doc, ok := s.docs.get(string(params.TextDocument.URI))
+	if !ok || doc.parsed == nil {
+		s.logger.Debug("definition skipped: no document")
+		return nil, nil
+	}
+
+	offset := params.Position.IndexIn(doc.text)
+	token := tokenAtOffset(doc.parsed.Tokens, offset)
+	if token == nil || isTriviaToken(token.Type) {
+		s.logger.Debug("definition skipped: no token")
+		return nil, nil
+	}
+
+	name := token.Value
+	def := findDefinition(doc.parsed.Root, name)
+	if def == nil {
+		s.logger.Debug("definition not found", "name", name)
+		return nil, nil
+	}
+
+	locRange, ok := nodeNameRange(doc.text, def)
+	if !ok {
+		s.logger.Debug("definition skipped: no range", "name", name)
+		return nil, nil
+	}
+
+	loc := protocol.Location{
+		URI:   params.TextDocument.URI,
+		Range: locRange,
+	}
+	s.logger.Debug("definition resolved", "name", name, "kind", def.Kind)
+	return []protocol.Location{loc}, nil
+}
+
 func tokenAtOffset(tokens []ppi.Token, offset int) *ppi.Token {
 	for i := range tokens {
 		tok := &tokens[i]
 		if offset >= tok.Start && offset < tok.End {
+			return tok
+		}
+	}
+	return nil
+}
+
+func tokenAtStart(tokens []ppi.Token, start int) *ppi.Token {
+	for i := range tokens {
+		tok := &tokens[i]
+		if tok.Start == start {
 			return tok
 		}
 	}
@@ -248,6 +296,36 @@ func findStatementForOffset(root *ppi.Node, offset int) *ppi.Node {
 			}
 		}
 		for _, child := range n.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	return best
+}
+
+func findDefinition(root *ppi.Node, name string) *ppi.Node {
+	if root == nil || name == "" {
+		return nil
+	}
+	var best *ppi.Node
+	var walk func(n *ppi.Node)
+	walk = func(n *ppi.Node) {
+		if n == nil {
+			return
+		}
+		if n.Type == ppi.NodeStatement {
+			switch n.Kind {
+			case "statement::sub", "statement::package":
+				if n.Name == name {
+					best = n
+					return
+				}
+			}
+		}
+		for _, child := range n.Children {
+			if best != nil {
+				return
+			}
 			walk(child)
 		}
 	}
@@ -404,6 +482,27 @@ func formatAttributes(attrs []ppi.AttrMeta) string {
 		}
 	}
 	return strings.Join(out, ", ")
+}
+
+func nodeNameRange(text string, node *ppi.Node) (protocol.Range, bool) {
+	if node == nil || node.Name == "" {
+		return protocol.Range{}, false
+	}
+	for i := range node.Tokens {
+		tok := node.Tokens[i]
+		if tok.Value == node.Name {
+			return tokenRange(text, &tok), true
+		}
+	}
+	start, _, ok := nodeTokenRange(node)
+	if !ok {
+		return protocol.Range{}, false
+	}
+	tok := tokenAtStart(node.Tokens, start)
+	if tok == nil {
+		return protocol.Range{}, false
+	}
+	return tokenRange(text, tok), true
 }
 
 func tokensToString(tokens []ppi.Token) string {
