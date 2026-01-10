@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -27,6 +28,8 @@ type Server struct {
 
 	workspaceMu    sync.RWMutex
 	workspaceRoots []string
+	incRoots       []string
+	extraRoots     map[string]struct{}
 	workspaceIndex *analysis.WorkspaceIndex
 }
 
@@ -242,6 +245,9 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 	if !ok || doc.parsed == nil {
 		s.logger.Debug("definition skipped: no document")
 		return nil, nil
+	}
+	if path, ok := uriToPath(params.TextDocument.URI); ok {
+		s.ensureUseLibPaths(doc.parsed.Root, path)
 	}
 
 	offset := params.Position.IndexIn(doc.text)
@@ -964,15 +970,25 @@ func toUIntegerPtr(version protocol.Integer) *protocol.UInteger {
 
 func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 	roots := workspaceRoots(params)
+	incRoots, err := perlINCPaths()
+	if err != nil {
+		s.logger.Debug("perl @INC lookup failed", "error", err)
+	}
+
 	s.workspaceMu.Lock()
 	s.workspaceRoots = roots
+	s.incRoots = incRoots
+	if s.extraRoots == nil {
+		s.extraRoots = make(map[string]struct{})
+	}
 	s.workspaceMu.Unlock()
 
-	if len(roots) == 0 {
+	merged := uniqueStrings(append(append([]string{}, roots...), incRoots...))
+	if len(merged) == 0 {
 		s.logger.Debug("workspace index skipped: no roots")
 		return
 	}
-	index, err := analysis.BuildWorkspaceIndex(roots)
+	index, err := analysis.BuildWorkspaceIndex(merged)
 	if err != nil {
 		s.logger.Debug("workspace index failed", "error", err)
 		return
@@ -980,7 +996,7 @@ func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 	s.workspaceMu.Lock()
 	s.workspaceIndex = index
 	s.workspaceMu.Unlock()
-	s.logger.Info("workspace index ready", "roots", len(roots), "files", index.Files)
+	s.logger.Info("workspace index ready", "roots", len(merged), "files", index.Files)
 }
 
 func workspaceRoots(params *protocol.InitializeParams) []string {
@@ -1072,6 +1088,114 @@ func packageCounts(index *analysis.WorkspaceIndex, imports map[string]map[string
 	out := make(map[string]int, len(imports))
 	for name := range imports {
 		out[name] = len(index.FindPackages(name, exclude))
+	}
+	return out
+}
+
+func (s *Server) ensureUseLibPaths(root *ppi.Node, filePath string) {
+	paths := collectUseLibPaths(root, filePath)
+	if len(paths) == 0 {
+		return
+	}
+	var added bool
+	s.workspaceMu.Lock()
+	if s.extraRoots == nil {
+		s.extraRoots = make(map[string]struct{})
+	}
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if _, ok := s.extraRoots[p]; ok {
+			continue
+		}
+		s.extraRoots[p] = struct{}{}
+		added = true
+	}
+	roots := append([]string{}, s.workspaceRoots...)
+	roots = append(roots, s.incRoots...)
+	for p := range s.extraRoots {
+		roots = append(roots, p)
+	}
+	s.workspaceMu.Unlock()
+
+	if !added {
+		return
+	}
+	roots = uniqueStrings(roots)
+	index, err := analysis.BuildWorkspaceIndex(roots)
+	if err != nil {
+		s.logger.Debug("workspace index rebuild failed", "error", err)
+		return
+	}
+	s.workspaceMu.Lock()
+	s.workspaceIndex = index
+	s.workspaceMu.Unlock()
+	s.logger.Info("workspace index rebuilt", "roots", len(roots), "files", index.Files)
+}
+
+func collectUseLibPaths(root *ppi.Node, filePath string) []string {
+	if root == nil {
+		return nil
+	}
+	dir := filepath.Dir(filePath)
+	var out []string
+	walkNodes(root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {
+			return
+		}
+		if strings.ToLower(n.Keyword) != "use" || strings.ToLower(n.Name) != "lib" {
+			return
+		}
+		items := n.ImportItems
+		if len(items) == 0 {
+			items = importItemsFromArgs(n.Args)
+		}
+		for _, item := range items {
+			item = strings.Trim(item, "\"'`")
+			if item == "" {
+				continue
+			}
+			if !filepath.IsAbs(item) {
+				item = filepath.Join(dir, item)
+			}
+			out = append(out, item)
+		}
+	})
+	return out
+}
+
+func perlINCPaths() ([]string, error) {
+	cmd := exec.Command("perl", "-e", "print join(\"\\n\", @INC)")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	var paths []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		paths = append(paths, line)
+	}
+	return paths, nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, v := range values {
+		v = strings.TrimSpace(v)
+		if v == "" {
+			continue
+		}
+		if _, ok := seen[v]; ok {
+			continue
+		}
+		seen[v] = struct{}{}
+		out = append(out, v)
 	}
 	return out
 }
