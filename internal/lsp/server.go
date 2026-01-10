@@ -620,6 +620,28 @@ func collectUsePackages(root *ppi.Node) []string {
 	return out
 }
 
+func filterUsePackages(index *analysis.WorkspaceIndex, pkgs []string, exclude string) []string {
+	if index == nil || len(pkgs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(pkgs))
+	seen := make(map[string]struct{})
+	for _, name := range pkgs {
+		if name == "" {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		if len(index.FindPackages(name, exclude)) == 0 {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
+}
+
 func nodeNameRange(text string, node *ppi.Node) (protocol.Range, bool) {
 	if node == nil || node.Name == "" {
 		return protocol.Range{}, false
@@ -970,7 +992,8 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 
-	for _, usePkg := range usePkgs {
+	filteredUsePkgs := filterUsePackages(index, usePkgs, exclude)
+	for _, usePkg := range filteredUsePkgs {
 		full := usePkg + "::" + name
 		defs := index.FindSubsFull(full, exclude)
 		if len(defs) > 0 {
@@ -978,7 +1001,7 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 
-	if len(usePkgs) == 0 && (pkg == "" || pkg == "main") {
+	if len(filteredUsePkgs) == 0 && (pkg == "" || pkg == "main") {
 		return nil, nil
 	}
 	defs := index.FindSubs(name, exclude)
