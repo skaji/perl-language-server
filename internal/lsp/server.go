@@ -113,7 +113,9 @@ func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any,
 	}
 	capabilities.HoverProvider = true
 	capabilities.DefinitionProvider = true
-	capabilities.CompletionProvider = &protocol.CompletionOptions{}
+	capabilities.CompletionProvider = &protocol.CompletionOptions{
+		TriggerCharacters: []string{"$", "@", "%"},
+	}
 
 	return protocol.InitializeResult{
 		Capabilities: capabilities,
