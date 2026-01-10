@@ -3,6 +3,9 @@ package lsp
 import (
 	"fmt"
 	"log/slog"
+	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 
@@ -21,6 +24,10 @@ type Server struct {
 	handler protocol.Handler
 	docs    *documentStore
 	logger  *slog.Logger
+
+	workspaceMu    sync.RWMutex
+	workspaceRoots []string
+	workspaceIndex *analysis.WorkspaceIndex
 }
 
 func NewServer(logger *slog.Logger) *Server {
@@ -102,8 +109,9 @@ func parseDocument(text string) *ppi.Document {
 	return doc
 }
 
-func (s *Server) initialize(_ *glsp.Context, _ *protocol.InitializeParams) (any, error) {
+func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) (any, error) {
 	s.logger.Debug("initialize request")
+	s.initWorkspaceIndex(params)
 	capabilities := s.handler.CreateServerCapabilities()
 
 	syncKind := protocol.TextDocumentSyncKindFull
@@ -237,12 +245,40 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		s.logger.Debug("definition skipped: no token")
 		return nil, nil
 	}
+	if token.Type != ppi.TokenWord {
+		s.logger.Debug("definition skipped: non-word token", "token", token.Value, "type", token.Type)
+		return nil, nil
+	}
 
 	name := token.Value
 	def := findDefinition(doc.parsed.Root, name)
 	if def == nil {
-		s.logger.Debug("definition not found", "name", name)
-		return nil, nil
+		defs, err := s.findWorkspaceDefinitions(name, params.TextDocument.URI)
+		if err != nil {
+			s.logger.Debug("definition lookup failed", "name", name, "error", err)
+			return nil, nil
+		}
+		if len(defs) == 0 {
+			s.logger.Debug("definition not found", "name", name)
+			return nil, nil
+		}
+		locations := make([]protocol.Location, 0, len(defs))
+		for _, def := range defs {
+			rng, ok := rangeFromFile(def.File, def.Start, def.End)
+			if !ok {
+				continue
+			}
+			locations = append(locations, protocol.Location{
+				URI:   protocol.DocumentUri(fileURI(def.File)),
+				Range: rng,
+			})
+		}
+		if len(locations) == 0 {
+			s.logger.Debug("definition skipped: no ranges", "name", name)
+			return nil, nil
+		}
+		s.logger.Debug("definition resolved (workspace)", "name", name, "count", len(locations))
+		return locations, nil
 	}
 
 	locRange, ok := nodeNameRange(doc.text, def)
@@ -791,6 +827,124 @@ func toUIntegerPtr(version protocol.Integer) *protocol.UInteger {
 	}
 	u := protocol.UInteger(version)
 	return &u
+}
+
+func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
+	roots := workspaceRoots(params)
+	s.workspaceMu.Lock()
+	s.workspaceRoots = roots
+	s.workspaceMu.Unlock()
+
+	if len(roots) == 0 {
+		s.logger.Debug("workspace index skipped: no roots")
+		return
+	}
+	index, err := analysis.BuildWorkspaceIndex(roots)
+	if err != nil {
+		s.logger.Debug("workspace index failed", "error", err)
+		return
+	}
+	s.workspaceMu.Lock()
+	s.workspaceIndex = index
+	s.workspaceMu.Unlock()
+	s.logger.Info("workspace index ready", "roots", len(roots), "files", index.Files)
+}
+
+func workspaceRoots(params *protocol.InitializeParams) []string {
+	if params == nil {
+		return nil
+	}
+	var roots []string
+	if len(params.WorkspaceFolders) > 0 {
+		for _, folder := range params.WorkspaceFolders {
+			if path, ok := uriToPath(folder.URI); ok {
+				roots = append(roots, path)
+			}
+		}
+	}
+	if len(roots) == 0 && params.RootURI != nil {
+		if path, ok := uriToPath(*params.RootURI); ok {
+			roots = append(roots, path)
+		}
+	}
+	if len(roots) == 0 && params.RootPath != nil {
+		roots = append(roots, *params.RootPath)
+	}
+	return roots
+}
+
+func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri) ([]analysis.Definition, error) {
+	s.workspaceMu.RLock()
+	index := s.workspaceIndex
+	s.workspaceMu.RUnlock()
+	if index == nil {
+		return nil, nil
+	}
+	exclude := ""
+	if path, ok := uriToPath(uri); ok {
+		exclude = path
+	}
+
+	if strings.Contains(name, "::") {
+		defs := index.FindPackages(name, exclude)
+		if len(defs) > 0 {
+			return defs, nil
+		}
+		return index.FindSubs(name, exclude), nil
+	}
+	defs := index.FindSubs(name, exclude)
+	if len(defs) > 0 {
+		return defs, nil
+	}
+	return index.FindPackages(name, exclude), nil
+}
+
+func rangeFromFile(path string, start int, end int) (protocol.Range, bool) {
+	if start < 0 || end < 0 || end < start {
+		return protocol.Range{}, false
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		return protocol.Range{}, false
+	}
+	text := string(src)
+	if start > len(text) {
+		return protocol.Range{}, false
+	}
+	if end > len(text) {
+		end = len(text)
+	}
+	return protocol.Range{
+		Start: positionFromOffset(text, start),
+		End:   positionFromOffset(text, end),
+	}, true
+}
+
+func uriToPath(uri protocol.DocumentUri) (string, bool) {
+	if uri == "" {
+		return "", false
+	}
+	u, err := url.Parse(string(uri))
+	if err != nil {
+		return "", false
+	}
+	if u.Scheme != "file" {
+		return "", false
+	}
+	path := u.Path
+	if path == "" && u.Opaque != "" {
+		path = u.Opaque
+	}
+	if path == "" {
+		return "", false
+	}
+	path = filepath.FromSlash(path)
+	return path, true
+}
+
+func fileURI(path string) string {
+	u := url.URL{Scheme: "file", Path: filepath.ToSlash(path)}
+	return u.String()
 }
 
 func tokenRange(text string, token *ppi.Token) protocol.Range {
