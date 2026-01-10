@@ -13,6 +13,7 @@ Start small and iterate:
 1. Implement a minimal LSP server that initializes and responds to basic requests.
 2. Wire in go-ppi to parse documents on open/change.
 3. Add language features (hover/definition/completion/etc.) once parsing/analysis is stable.
+4. Keep `make build`, `make test`, and `make lint` passing at all times.
 
 ## Notes and Gotchas
 
