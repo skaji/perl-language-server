@@ -1034,6 +1034,9 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 	}
 
 	filteredUseImports := filterUseImports(index, useImports, exclude)
+	if len(filteredUseImports) == 0 && len(useImports) > 0 {
+		s.logger.Debug("use imports filtered", "imports", mapKeys(useImports), "packages", packageCounts(index, useImports, exclude))
+	}
 	if len(filteredUseImports) == 0 && (pkg == "" || pkg == "main") {
 		return nil, nil
 	}
@@ -1048,6 +1051,28 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 		}
 	}
 	return nil, nil
+}
+
+func mapKeys(m map[string]map[string]struct{}) []string {
+	if len(m) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func packageCounts(index *analysis.WorkspaceIndex, imports map[string]map[string]struct{}, exclude string) map[string]int {
+	if index == nil || len(imports) == 0 {
+		return nil
+	}
+	out := make(map[string]int, len(imports))
+	for name := range imports {
+		out[name] = len(index.FindPackages(name, exclude))
+	}
+	return out
 }
 
 func rangeFromFile(path string, start int, end int) (protocol.Range, bool) {
