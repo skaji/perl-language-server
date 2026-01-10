@@ -196,7 +196,7 @@ func (s *Server) didClose(context *glsp.Context, params *protocol.DidCloseTextDo
 }
 
 func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
-	s.logger.Debug("hover", "uri", params.TextDocument.URI, "line", params.Position.Line, "character", params.Position.Character)
+	s.logger.Debug("hover", "uri", params.TextDocument.URI, "line", params.Position.Line+1, "character", params.Position.Character+1)
 	doc, ok := s.docs.get(string(params.TextDocument.URI))
 	if !ok || doc.parsed == nil {
 		s.logger.Debug("hover skipped: no document")
@@ -237,7 +237,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 }
 
 func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
-	s.logger.Debug("definition", "uri", params.TextDocument.URI, "line", params.Position.Line, "character", params.Position.Character)
+	s.logger.Debug("definition", "uri", params.TextDocument.URI, "line", params.Position.Line+1, "character", params.Position.Character+1)
 	doc, ok := s.docs.get(string(params.TextDocument.URI))
 	if !ok || doc.parsed == nil {
 		s.logger.Debug("definition skipped: no document")
@@ -308,7 +308,7 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 }
 
 func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) (any, error) {
-	s.logger.Debug("completion", "uri", params.TextDocument.URI, "line", params.Position.Line, "character", params.Position.Character)
+	s.logger.Debug("completion", "uri", params.TextDocument.URI, "line", params.Position.Line+1, "character", params.Position.Character+1)
 	doc, ok := s.docs.get(string(params.TextDocument.URI))
 	if !ok || doc.parsed == nil {
 		s.logger.Debug("completion skipped: no document")
