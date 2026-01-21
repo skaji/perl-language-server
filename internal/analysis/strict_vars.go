@@ -55,9 +55,95 @@ func hasUseStrict(root *ppi.Node) bool {
 		}
 		if strings.ToLower(n.Name) == "strict" {
 			found = true
+			return
+		}
+		if n.Version != "" && isStrictVersion(n.Version) {
+			found = true
 		}
 	})
 	return found
+}
+
+func isStrictVersion(version string) bool {
+	major, minor, patch, ok := parsePerlVersion(version)
+	if !ok {
+		return false
+	}
+	if major > 5 {
+		return true
+	}
+	if major < 5 {
+		return false
+	}
+	if minor > 12 {
+		return true
+	}
+	if minor < 12 {
+		return false
+	}
+	return patch >= 0
+}
+
+func parsePerlVersion(version string) (int, int, int, bool) {
+	v := strings.TrimSpace(version)
+	if v == "" {
+		return 0, 0, 0, false
+	}
+	v = strings.TrimPrefix(v, "v")
+	if strings.Contains(v, ".") {
+		parts := strings.Split(v, ".")
+		if len(parts) == 0 {
+			return 0, 0, 0, false
+		}
+		major, ok := parseInt(parts[0])
+		if !ok {
+			return 0, 0, 0, false
+		}
+		minor := 0
+		patch := 0
+		if len(parts) > 1 {
+			if val, ok := parseInt(parts[1]); ok {
+				minor = val
+			}
+		}
+		if len(parts) > 2 {
+			if val, ok := parseInt(parts[2]); ok {
+				patch = val
+			}
+		}
+		return major, minor, patch, true
+	}
+	if val, ok := parseInt(v); ok {
+		if val < 10 {
+			return val, 0, 0, true
+		}
+		if val >= 1000000 {
+			major := val / 1000000
+			minor := (val / 1000) % 1000
+			patch := val % 1000
+			return major, minor, patch, true
+		}
+		if val >= 1000 {
+			major := val / 1000
+			minor := val % 1000
+			return major, minor, 0, true
+		}
+	}
+	return 0, 0, 0, false
+}
+
+func parseInt(value string) (int, bool) {
+	if value == "" {
+		return 0, false
+	}
+	n := 0
+	for _, ch := range value {
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n, true
 }
 
 type declaredSymbols struct {
