@@ -3,7 +3,7 @@ module github.com/skaji/perl-language-server
 go 1.25.1
 
 require (
-	github.com/tliron/commonlog v0.2.21
+	github.com/skaji/go-ppi v0.0.2
 	github.com/tliron/glsp v0.2.2
 )
 
@@ -19,8 +19,8 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sasha-s/go-deadlock v0.3.6 // indirect
 	github.com/segmentio/ksuid v1.0.4 // indirect
-	github.com/skaji/go-ppi v0.0.2 // indirect
 	github.com/sourcegraph/jsonrpc2 v0.2.0 // indirect
+	github.com/tliron/commonlog v0.2.21 // indirect
 	github.com/tliron/go-kutil v0.4.0 // indirect
 	golang.org/x/crypto v0.46.0 // indirect
 	golang.org/x/net v0.47.0 // indirect
