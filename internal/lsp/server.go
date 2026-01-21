@@ -1098,12 +1098,14 @@ func (s *Server) moduleLocation(name string, uri protocol.DocumentUri) (protocol
 	}
 	s.workspaceMu.RUnlock()
 	if index == nil {
+		s.logger.Debug("module lookup skipped: no index", "name", name)
 		return protocol.Location{}, false
 	}
 	exclude := ""
 	if path, ok := uriToPath(uri); ok {
 		exclude = path
 	}
+	s.logger.Debug("module lookup", "name", name, "exclude", exclude)
 	defs := index.FindPackages(name, exclude)
 	if len(defs) == 0 {
 		s.logger.Debug("module not found in index", "name", name, "roots", uniqueStrings(roots))
