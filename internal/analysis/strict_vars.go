@@ -23,9 +23,16 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 	}
 	declared := collectDeclaredSymbols(index.Root)
 	var diags []VarDiagnostic
-	for _, tok := range doc.Tokens {
+	for i := 0; i < len(doc.Tokens); i++ {
+		tok := doc.Tokens[i]
 		if tok.Type != ppi.TokenSymbol {
 			continue
+		}
+		if tok.Value == "$" {
+			if name, next := compositeSpecialVar(doc.Tokens, i); name != "" {
+				i = next
+				continue
+			}
 		}
 		if !strictAt(doc.Root, tok.Start) {
 			continue
@@ -264,4 +271,47 @@ func isSpecialVar(name string) bool {
 		return true
 	}
 	return false
+}
+
+func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
+	next := nextNonTrivia(tokens, idx+1)
+	if next < 0 {
+		return "", idx
+	}
+	tok := tokens[next]
+	if tok.Type == ppi.TokenOperator {
+		switch tok.Value {
+		case "^":
+			nextWord := nextNonTrivia(tokens, next+1)
+			if nextWord < 0 {
+				return "", idx
+			}
+			word := tokens[nextWord]
+			if word.Type != ppi.TokenWord && word.Type != ppi.TokenOperator {
+				return "", idx
+			}
+			name := "$^" + word.Value
+			if isSpecialVar(name) {
+				return name, nextWord
+			}
+		case "]", "[":
+			name := "$" + tok.Value
+			if isSpecialVar(name) {
+				return name, next
+			}
+		}
+	}
+	return "", idx
+}
+
+func nextNonTrivia(tokens []ppi.Token, idx int) int {
+	for i := idx; i < len(tokens); i++ {
+		switch tokens[i].Type {
+		case ppi.TokenWhitespace, ppi.TokenComment, ppi.TokenHereDocContent:
+			continue
+		default:
+			return i
+		}
+	}
+	return -1
 }
