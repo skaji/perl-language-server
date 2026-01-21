@@ -974,6 +974,7 @@ func toUIntegerPtr(version protocol.Integer) *protocol.UInteger {
 
 func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 	roots := workspaceRoots(params)
+	s.logger.Debug("workspace roots", "roots", roots)
 	baseRoots := defaultLibRoots(roots)
 	incRoots, err := perlINCPaths()
 	if err != nil {
