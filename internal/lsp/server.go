@@ -931,6 +931,7 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 	if doc != nil {
 		version = doc.version
 		diagnostics = toProtocolDiagnostics(doc.text, doc.parsed)
+		diagnostics = append(diagnostics, toStrictVarDiagnostics(doc.text, doc.parsed)...)
 	}
 
 	if context != nil && context.Notify != nil {
@@ -976,6 +977,26 @@ func toProtocolSeverity(sev ppi.DiagnosticSeverity) protocol.DiagnosticSeverity 
 	default:
 		return protocol.DiagnosticSeverityError
 	}
+}
+
+func toStrictVarDiagnostics(text string, doc *ppi.Document) []protocol.Diagnostic {
+	diags := analysis.StrictVarDiagnostics(doc)
+	if len(diags) == 0 {
+		return nil
+	}
+	out := make([]protocol.Diagnostic, 0, len(diags))
+	source := "perl-lsp"
+	sev := protocol.DiagnosticSeverityWarning
+	for _, diag := range diags {
+		rng := diagnosticRange(text, diag.Offset)
+		out = append(out, protocol.Diagnostic{
+			Range:    rng,
+			Severity: &sev,
+			Source:   &source,
+			Message:  diag.Message,
+		})
+	}
+	return out
 }
 
 func diagnosticRange(text string, offset int) protocol.Range {
