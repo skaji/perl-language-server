@@ -308,6 +308,8 @@ func isSpecialVar(name string) bool {
 		switch name[1] {
 		case '0', '1', '2', '3', '4', '5', '6', '7', '8', '9':
 			return true
+		case 'a', 'b':
+			return true
 		}
 	}
 	if strings.HasPrefix(name, "$^") {
