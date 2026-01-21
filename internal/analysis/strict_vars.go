@@ -17,9 +17,6 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 	if doc == nil || doc.Root == nil {
 		return nil
 	}
-	if !hasUseStrict(doc.Root) {
-		return nil
-	}
 	index := IndexDocument(doc)
 	if index == nil {
 		return nil
@@ -28,6 +25,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 	var diags []VarDiagnostic
 	for _, tok := range doc.Tokens {
 		if tok.Type != ppi.TokenSymbol {
+			continue
+		}
+		if !strictAt(doc.Root, tok.Start) {
 			continue
 		}
 		if isSpecialVar(tok.Value) {
@@ -42,26 +42,6 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		})
 	}
 	return diags
-}
-
-func hasUseStrict(root *ppi.Node) bool {
-	found := false
-	walkNodes(root, func(n *ppi.Node) {
-		if found || n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {
-			return
-		}
-		if strings.ToLower(n.Keyword) != "use" {
-			return
-		}
-		if strings.ToLower(n.Name) == "strict" {
-			found = true
-			return
-		}
-		if n.Version != "" && isStrictVersion(n.Version) {
-			found = true
-		}
-	})
-	return found
 }
 
 func isStrictVersion(version string) bool {
@@ -144,6 +124,76 @@ func parseInt(value string) (int, bool) {
 		n = n*10 + int(ch-'0')
 	}
 	return n, true
+}
+
+func strictAt(root *ppi.Node, offset int) bool {
+	if root == nil {
+		return false
+	}
+	return strictAtNodes(root.Children, offset, false)
+}
+
+func strictAtNodes(nodes []*ppi.Node, offset int, strict bool) bool {
+	for _, n := range nodes {
+		if n == nil {
+			continue
+		}
+		start, end, ok := nodeTokenRange(n)
+		if ok && offset < start {
+			return strict
+		}
+		if blk := nodeBlockChild(n); blk != nil {
+			bs, be, ok := nodeTokenRange(blk)
+			if ok && offset >= bs && offset < be {
+				return strictAtNodes(blk.Children, offset, strict)
+			}
+		}
+		if isStrictToggle(n) {
+			if ok && offset < end {
+				return strict
+			}
+			strict = strictValue(n)
+		}
+	}
+	return strict
+}
+
+func isStrictToggle(n *ppi.Node) bool {
+	if n == nil || n.Kind != "statement::include" {
+		return false
+	}
+	if strings.ToLower(n.Keyword) == "use" && n.Version != "" && isStrictVersion(n.Version) {
+		return true
+	}
+	if strings.ToLower(n.Name) != "strict" {
+		return false
+	}
+	return strings.ToLower(n.Keyword) == "use" || strings.ToLower(n.Keyword) == "no"
+}
+
+func strictValue(n *ppi.Node) bool {
+	if n == nil {
+		return false
+	}
+	if strings.ToLower(n.Keyword) == "use" && n.Version != "" && isStrictVersion(n.Version) {
+		return true
+	}
+	return strings.ToLower(n.Keyword) == "use"
+}
+
+func nodeBlockChild(n *ppi.Node) *ppi.Node {
+	if n == nil {
+		return nil
+	}
+	if n.Type == ppi.NodeBlock {
+		return n
+	}
+	for _, child := range n.Children {
+		if child != nil && child.Type == ppi.NodeBlock {
+			return child
+		}
+	}
+	return nil
 }
 
 type declaredSymbols struct {
