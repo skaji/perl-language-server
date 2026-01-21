@@ -43,6 +43,16 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if _, ok := declared.visible(tok.Value, tok.Start); ok {
 			continue
 		}
+		if strings.HasPrefix(tok.Value, "$") && len(tok.Value) > 1 {
+			alt := "@" + tok.Value[1:]
+			if _, ok := declared.visible(alt, tok.Start); ok {
+				continue
+			}
+			alt = "%" + tok.Value[1:]
+			if _, ok := declared.visible(alt, tok.Start); ok {
+				continue
+			}
+		}
 		diags = append(diags, VarDiagnostic{
 			Message: "use strict vars: variable " + tok.Value + " is not declared",
 			Offset:  tok.Start,
