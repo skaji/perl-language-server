@@ -800,10 +800,19 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) [
 		seen[label] = kind
 		k := kind
 		d := detail
+		var insertText *string
+		if len(prefix) > 0 {
+			sigil := prefix[:1]
+			if (sigil == "$" || sigil == "@" || sigil == "%") && strings.HasPrefix(label, sigil) && len(label) > 1 {
+				text := label[1:]
+				insertText = &text
+			}
+		}
 		items = append(items, protocol.CompletionItem{
-			Label:  label,
-			Kind:   &k,
-			Detail: &d,
+			Label:      label,
+			Kind:       &k,
+			Detail:     &d,
+			InsertText: insertText,
 		})
 	}
 
