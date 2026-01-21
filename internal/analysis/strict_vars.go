@@ -28,6 +28,11 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if tok.Type != ppi.TokenSymbol {
 			continue
 		}
+		if tok.Value == "$" {
+			if i+1 < len(doc.Tokens) && doc.Tokens[i+1].Type == ppi.TokenComment && strings.HasPrefix(doc.Tokens[i+1].Value, "#{") {
+				continue
+			}
+		}
 		if strings.HasPrefix(tok.Value, "*") {
 			continue
 		}
@@ -46,6 +51,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 			}
 		}
 		if tok.Value == "$" {
+			if isHashSizeDeref(doc.Tokens, i) {
+				continue
+			}
 			if name, next := compositeSpecialVar(doc.Tokens, i); name != "" {
 				i = next
 				continue
@@ -336,7 +344,7 @@ func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
 		return "", idx
 	}
 	tok := tokens[next]
-	if tok.Type == ppi.TokenOperator || tok.Type == ppi.TokenSymbol {
+	if tok.Type == ppi.TokenOperator || tok.Type == ppi.TokenSymbol || tok.Type == ppi.TokenComment {
 		switch tok.Value {
 		case "^":
 			nextWord := nextNonTrivia(tokens, next+1)
@@ -359,6 +367,8 @@ func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
 			if tokens[nextVar].Type == ppi.TokenOperator && tokens[nextVar].Value == "{" {
 				return "$#{", nextVar
 			}
+		case "#{$x};", "#{$x}", "#{$X};", "#{$X}":
+			return "$#{", next
 		case "]", "[", "?", "!", "@", "$", "<", ">", "|", ",", ";", ":", "-", "~", "*", "'", "\"", "/", "=", "\\":
 			name := "$" + tok.Value
 			if isSpecialVar(name) {
@@ -421,4 +431,26 @@ func prevNonTrivia(tokens []ppi.Token, idx int) int {
 		}
 	}
 	return -1
+}
+
+func isHashSizeDeref(tokens []ppi.Token, idx int) bool {
+	next := nextNonTrivia(tokens, idx+1)
+	if next < 0 || tokens[next].Type != ppi.TokenOperator || tokens[next].Value != "#" {
+		if next >= 0 && tokens[next].Type == ppi.TokenComment && strings.HasPrefix(tokens[next].Value, "#{") {
+			return true
+		}
+		return false
+	}
+	next = nextNonTrivia(tokens, next+1)
+	if next < 0 {
+		return false
+	}
+	tok := tokens[next]
+	if tok.Type == ppi.TokenOperator && tok.Value == "{" {
+		return true
+	}
+	if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") {
+		return true
+	}
+	return false
 }
