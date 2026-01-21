@@ -28,6 +28,11 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if tok.Type != ppi.TokenSymbol {
 			continue
 		}
+		if tok.Value == "@" || tok.Value == "%" {
+			if isSigilDeref(doc.Tokens, i) {
+				continue
+			}
+		}
 		if tok.Value == "$" {
 			if name, next := compositeSpecialVar(doc.Tokens, i); name != "" {
 				i = next
@@ -337,4 +342,25 @@ func nextNonTrivia(tokens []ppi.Token, idx int) int {
 		}
 	}
 	return -1
+}
+
+func isSigilDeref(tokens []ppi.Token, idx int) bool {
+	next := nextNonTrivia(tokens, idx+1)
+	if next < 0 {
+		return false
+	}
+	tok := tokens[next]
+	if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") {
+		return true
+	}
+	if tok.Type == ppi.TokenOperator && tok.Value == "{" {
+		nextVar := nextNonTrivia(tokens, next+1)
+		if nextVar < 0 {
+			return false
+		}
+		if tokens[nextVar].Type == ppi.TokenSymbol && strings.HasPrefix(tokens[nextVar].Value, "$") {
+			return true
+		}
+	}
+	return false
 }
