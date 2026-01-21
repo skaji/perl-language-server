@@ -986,7 +986,7 @@ func toStrictVarDiagnostics(text string, doc *ppi.Document) []protocol.Diagnosti
 	}
 	out := make([]protocol.Diagnostic, 0, len(diags))
 	source := "perl-lsp"
-	sev := protocol.DiagnosticSeverityWarning
+	sev := protocol.DiagnosticSeverityError
 	for _, diag := range diags {
 		rng := diagnosticRange(text, diag.Offset)
 		out = append(out, protocol.Diagnostic{
