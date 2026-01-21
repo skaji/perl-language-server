@@ -975,7 +975,7 @@ func toUIntegerPtr(version protocol.Integer) *protocol.UInteger {
 func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 	roots := workspaceRoots(params)
 	s.logger.Debug("workspace roots", "roots", roots)
-	baseRoots := defaultLibRoots(roots)
+	baseRoots := filterExistingRoots(defaultLibRoots(roots), s.logger)
 	incRoots, err := perlINCPaths()
 	if err != nil {
 		s.logger.Debug("perl @INC lookup failed", "error", err)
@@ -1148,7 +1148,7 @@ func packageCounts(index *analysis.WorkspaceIndex, imports map[string]map[string
 }
 
 func (s *Server) ensureUseLibPaths(root *ppi.Node, filePath string) {
-	paths := collectUseLibPaths(root, filePath)
+	paths := filterExistingRoots(collectUseLibPaths(root, filePath), s.logger)
 	if len(paths) == 0 {
 		return
 	}
@@ -1251,6 +1251,27 @@ func uniqueStrings(values []string) []string {
 		}
 		seen[v] = struct{}{}
 		out = append(out, v)
+	}
+	return out
+}
+
+func filterExistingRoots(paths []string, logger *slog.Logger) []string {
+	if len(paths) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		info, err := os.Stat(p)
+		if err != nil || !info.IsDir() {
+			if logger != nil {
+				logger.Debug("skip missing root", "path", p, "error", err)
+			}
+			continue
+		}
+		out = append(out, p)
 	}
 	return out
 }
