@@ -90,6 +90,42 @@ func TestStrictVarsHashSize(t *testing.T) {
 	}
 }
 
+func TestStrictVarsHashSizeScalar(t *testing.T) {
+	src := "use strict; my $headers; $#$headers;"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsTypeglobDeref(t *testing.T) {
+	src := "use strict; my $self; ${*$self}{+__PACKAGE__};"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsDoubleDeref(t *testing.T) {
+	src := "use strict; my $x; $$x;"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsConfigSlice(t *testing.T) {
+	src := "use strict; use Config; $Config{foo}; @Config{'foo','bar'};"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
 func parseDoc(src string) *ppi.Document {
 	doc := ppi.NewDocument(src)
 	doc.ParseWithDiagnostics()

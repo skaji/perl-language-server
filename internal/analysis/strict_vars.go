@@ -21,6 +21,7 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 	if index == nil {
 		return nil
 	}
+	allowConfig := hasUseModule(doc.Root, "Config")
 	declared := collectDeclaredSymbols(index.Root)
 	var diags []VarDiagnostic
 	for i := 0; i < len(doc.Tokens); i++ {
@@ -46,6 +47,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if strings.HasPrefix(tok.Value, "@") && len(tok.Value) > 1 {
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
+				if allowConfig && tok.Value == "@Config" {
+					continue
+				}
 				alt := "%" + tok.Value[1:]
 				if _, ok := declared.visible(alt, tok.Start); ok {
 					continue
@@ -65,8 +69,27 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 				i = next
 				continue
 			}
+			next := nextNonTrivia(doc.Tokens, i+1)
+			if next >= 0 && doc.Tokens[next].Type == ppi.TokenSymbol && strings.HasPrefix(doc.Tokens[next].Value, "$") {
+				if _, ok := declared.visible(doc.Tokens[next].Value, tok.Start); ok {
+					continue
+				}
+			}
 		}
 		if tok.Value == "$#" {
+			next := nextNonTrivia(doc.Tokens, i+1)
+			if next >= 0 {
+				if doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
+					continue
+				}
+				if doc.Tokens[next].Type == ppi.TokenSymbol && strings.HasPrefix(doc.Tokens[next].Value, "$") {
+					if _, ok := declared.visible(doc.Tokens[next].Value, tok.Start); ok {
+						continue
+					}
+				}
+			}
+		}
+		if tok.Value == "$" {
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
 				continue
@@ -76,6 +99,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 			continue
 		}
 		if isSpecialVar(tok.Value) {
+			continue
+		}
+		if allowConfig && (tok.Value == "$Config" || tok.Value == "%Config") {
 			continue
 		}
 		if strings.Contains(tok.Value, "::") {
@@ -256,6 +282,25 @@ func strictValue(n *ppi.Node) bool {
 		return true
 	}
 	return strings.ToLower(n.Keyword) == "use"
+}
+
+func hasUseModule(root *ppi.Node, name string) bool {
+	if root == nil || name == "" {
+		return false
+	}
+	found := false
+	walkNodes(root, func(n *ppi.Node) {
+		if found || n == nil || n.Kind != "statement::include" {
+			return
+		}
+		if strings.ToLower(n.Keyword) != "use" {
+			return
+		}
+		if n.Name == name {
+			found = true
+		}
+	})
+	return found
 }
 
 func nodeBlockChild(n *ppi.Node) *ppi.Node {
