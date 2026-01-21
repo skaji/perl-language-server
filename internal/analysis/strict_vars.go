@@ -44,15 +44,28 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 			continue
 		}
 		if strings.HasPrefix(tok.Value, "$") && len(tok.Value) > 1 {
-			alt := "@" + tok.Value[1:]
-			if _, ok := declared.visible(alt, tok.Start); ok {
-				continue
+			allowed := []string{"@", "%"}
+			next := nextNonTrivia(doc.Tokens, i+1)
+			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator {
+				switch doc.Tokens[next].Value {
+				case "{":
+					allowed = []string{"%"}
+				case "[":
+					allowed = []string{"@"}
+				}
 			}
-			alt = "%" + tok.Value[1:]
-			if _, ok := declared.visible(alt, tok.Start); ok {
-				continue
+			for _, sigil := range allowed {
+				alt := sigil + tok.Value[1:]
+				if _, ok := declared.visible(alt, tok.Start); ok {
+					goto declaredOK
+				}
 			}
 		}
+		// fallthrough: not declared
+		goto undeclared
+	declaredOK:
+		continue
+	undeclared:
 		diags = append(diags, VarDiagnostic{
 			Message: "use strict vars: variable " + tok.Value + " is not declared",
 			Offset:  tok.Start,
