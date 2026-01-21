@@ -51,6 +51,12 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 				continue
 			}
 		}
+		if tok.Value == "$#" {
+			next := nextNonTrivia(doc.Tokens, i+1)
+			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
+				continue
+			}
+		}
 		if !strictAt(doc.Root, tok.Start) {
 			continue
 		}
