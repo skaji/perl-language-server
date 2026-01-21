@@ -367,6 +367,12 @@ func isSigilDeref(tokens []ppi.Token, idx int) bool {
 		return false
 	}
 	tok := tokens[next]
+	if tok.Type == ppi.TokenOperator && (tok.Value == "@" || tok.Value == "$") {
+		name := "$" + tok.Value
+		if isSpecialVar(name) {
+			return true
+		}
+	}
 	if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") {
 		return true
 	}
