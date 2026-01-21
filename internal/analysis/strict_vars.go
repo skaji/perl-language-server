@@ -328,7 +328,7 @@ func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
 			if isSpecialVar(name) {
 				return name, nextWord
 			}
-		case "]", "[":
+		case "]", "[", "?", "!", "@", "$", "<", ">", "|", ",", ";", "#", ":", "-", "~", "*", "'", "\"", "/", "=", "\\":
 			name := "$" + tok.Value
 			if isSpecialVar(name) {
 				return name, next
