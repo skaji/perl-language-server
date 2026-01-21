@@ -28,6 +28,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if tok.Type != ppi.TokenSymbol {
 			continue
 		}
+		if strings.HasPrefix(tok.Value, "*") {
+			continue
+		}
 		if strings.HasPrefix(tok.Value, "@") && len(tok.Value) > 1 {
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
