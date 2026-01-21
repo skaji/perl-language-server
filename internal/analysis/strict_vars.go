@@ -374,8 +374,6 @@ func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
 			if tokens[nextVar].Type == ppi.TokenOperator && tokens[nextVar].Value == "{" {
 				return "$#{", nextVar
 			}
-		case "#{$x};", "#{$x}", "#{$X};", "#{$X}":
-			return "$#{", next
 		case "]", "[", "?", "!", "@", "$", "<", ">", "|", ",", ";", ":", "-", "~", "*", "'", "\"", "/", "=", "\\":
 			name := "$" + tok.Value
 			if isSpecialVar(name) {
