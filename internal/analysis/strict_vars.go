@@ -30,7 +30,14 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		}
 		if tok.Value == "$" {
 			if i+1 < len(doc.Tokens) && doc.Tokens[i+1].Type == ppi.TokenComment && strings.HasPrefix(doc.Tokens[i+1].Value, "#{") {
-				continue
+				if name := parseHashSizeCommentVar(doc.Tokens[i+1].Value); name != "" {
+					if isSpecialVar(name) {
+						continue
+					}
+					if _, ok := declared.visible(name, tok.Start); ok {
+						continue
+					}
+				}
 			}
 		}
 		if strings.HasPrefix(tok.Value, "*") {
@@ -453,4 +460,25 @@ func isHashSizeDeref(tokens []ppi.Token, idx int) bool {
 		return true
 	}
 	return false
+}
+
+func parseHashSizeCommentVar(value string) string {
+	pos := strings.Index(value, "$")
+	if pos < 0 || pos+1 >= len(value) {
+		return ""
+	}
+	start := pos
+	pos++
+	for pos < len(value) {
+		ch := value[pos]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == ':' {
+			pos++
+			continue
+		}
+		break
+	}
+	if pos == start+1 {
+		return ""
+	}
+	return value[start:pos]
 }
