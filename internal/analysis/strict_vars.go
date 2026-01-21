@@ -54,6 +54,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if isSpecialVar(tok.Value) {
 			continue
 		}
+		if strings.Contains(tok.Value, "::") {
+			continue
+		}
 		if _, ok := declared.visible(tok.Value, tok.Start); ok {
 			continue
 		}
