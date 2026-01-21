@@ -28,6 +28,15 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if tok.Type != ppi.TokenSymbol {
 			continue
 		}
+		if strings.HasPrefix(tok.Value, "@") && len(tok.Value) > 1 {
+			next := nextNonTrivia(doc.Tokens, i+1)
+			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
+				alt := "%" + tok.Value[1:]
+				if _, ok := declared.visible(alt, tok.Start); ok {
+					continue
+				}
+			}
+		}
 		if tok.Value == "@" || tok.Value == "%" {
 			if isSigilDeref(doc.Tokens, i) {
 				continue
