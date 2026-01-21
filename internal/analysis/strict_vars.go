@@ -324,7 +324,7 @@ func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
 		return "", idx
 	}
 	tok := tokens[next]
-	if tok.Type == ppi.TokenOperator {
+	if tok.Type == ppi.TokenOperator || tok.Type == ppi.TokenSymbol {
 		switch tok.Value {
 		case "^":
 			nextWord := nextNonTrivia(tokens, next+1)
