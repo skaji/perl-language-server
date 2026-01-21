@@ -59,6 +59,12 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 					allowed = []string{"@"}
 				}
 			}
+			if allowed[0] == "%" {
+				alt := "%" + tok.Value[1:]
+				if isSpecialVar(alt) {
+					goto declaredOK
+				}
+			}
 			for _, sigil := range allowed {
 				alt := sigil + tok.Value[1:]
 				if _, ok := declared.visible(alt, tok.Start); ok {
