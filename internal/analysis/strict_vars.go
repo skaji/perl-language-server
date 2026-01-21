@@ -359,12 +359,18 @@ func isSigilDeref(tokens []ppi.Token, idx int) bool {
 	if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") {
 		return true
 	}
+	if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "%") {
+		return true
+	}
 	if tok.Type == ppi.TokenOperator && tok.Value == "{" {
 		nextVar := nextNonTrivia(tokens, next+1)
 		if nextVar < 0 {
 			return false
 		}
 		if tokens[nextVar].Type == ppi.TokenSymbol && strings.HasPrefix(tokens[nextVar].Value, "$") {
+			return true
+		}
+		if tokens[nextVar].Type == ppi.TokenSymbol && strings.HasPrefix(tokens[nextVar].Value, "%") {
 			return true
 		}
 	}
