@@ -331,7 +331,16 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	if doc.index != nil {
 		vars = doc.index.VariablesAt(offset)
 	}
-	items := completionItems(doc.parsed, vars, prefix)
+	var replaceRange *protocol.Range
+	if len(prefix) > 0 {
+		start := max(0, offset-len(prefix))
+		rng := protocol.Range{
+			Start: positionFromOffset(doc.text, start),
+			End:   positionFromOffset(doc.text, offset),
+		}
+		replaceRange = &rng
+	}
+	items := completionItems(doc.parsed, vars, prefix, replaceRange)
 	s.logger.Debug("completion resolved", "prefix", prefix, "count", len(items))
 
 	return protocol.CompletionList{
@@ -780,7 +789,7 @@ func isCompletionChar(ch byte) bool {
 	}
 }
 
-func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) []protocol.CompletionItem {
+func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string, replaceRange *protocol.Range) []protocol.CompletionItem {
 	if doc == nil || doc.Root == nil {
 		return nil
 	}
@@ -801,11 +810,16 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) [
 		k := kind
 		d := detail
 		var insertText *string
+		var textEdit *protocol.TextEdit
 		if len(prefix) == 1 {
 			sigil := prefix[:1]
 			if (sigil == "$" || sigil == "@" || sigil == "%") && strings.HasPrefix(label, sigil) && len(label) > 1 {
-				text := label[1:]
-				insertText = &text
+				if replaceRange != nil {
+					textEdit = &protocol.TextEdit{Range: *replaceRange, NewText: label}
+				} else {
+					text := label[1:]
+					insertText = &text
+				}
 			}
 		}
 		items = append(items, protocol.CompletionItem{
@@ -813,6 +827,7 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string) [
 			Kind:       &k,
 			Detail:     &d,
 			InsertText: insertText,
+			TextEdit:   textEdit,
 		})
 	}
 
