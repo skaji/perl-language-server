@@ -1091,6 +1091,11 @@ func (s *Server) findWorkspaceDefinitions(name string, uri protocol.DocumentUri,
 func (s *Server) moduleLocation(name string, uri protocol.DocumentUri) (protocol.Location, bool) {
 	s.workspaceMu.RLock()
 	index := s.workspaceIndex
+	roots := append([]string{}, s.workspaceRoots...)
+	roots = append(roots, s.incRoots...)
+	for p := range s.extraRoots {
+		roots = append(roots, p)
+	}
 	s.workspaceMu.RUnlock()
 	if index == nil {
 		return protocol.Location{}, false
@@ -1101,6 +1106,7 @@ func (s *Server) moduleLocation(name string, uri protocol.DocumentUri) (protocol
 	}
 	defs := index.FindPackages(name, exclude)
 	if len(defs) == 0 {
+		s.logger.Debug("module not found in index", "name", name, "roots", uniqueStrings(roots))
 		return protocol.Location{}, false
 	}
 	path := defs[0].File
