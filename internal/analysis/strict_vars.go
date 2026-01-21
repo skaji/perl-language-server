@@ -345,7 +345,15 @@ func compositeSpecialVar(tokens []ppi.Token, idx int) (string, int) {
 			if isSpecialVar(name) {
 				return name, nextWord
 			}
-		case "]", "[", "?", "!", "@", "$", "<", ">", "|", ",", ";", "#", ":", "-", "~", "*", "'", "\"", "/", "=", "\\":
+		case "#":
+			nextVar := nextNonTrivia(tokens, next+1)
+			if nextVar < 0 {
+				return "", idx
+			}
+			if tokens[nextVar].Type == ppi.TokenOperator && tokens[nextVar].Value == "{" {
+				return "$#{", nextVar
+			}
+		case "]", "[", "?", "!", "@", "$", "<", ">", "|", ",", ";", ":", "-", "~", "*", "'", "\"", "/", "=", "\\":
 			name := "$" + tok.Value
 			if isSpecialVar(name) {
 				return name, next
@@ -386,7 +394,25 @@ func isSigilDeref(tokens []ppi.Token, idx int) bool {
 		return true
 	}
 	if tok.Type == ppi.TokenOperator && tok.Value == "{" {
+		prev := prevNonTrivia(tokens, idx-1)
+		if prev >= 0 && tokens[prev].Type == ppi.TokenSymbol && tokens[prev].Value == "$#" {
+			return true
+		}
+	}
+	if tok.Type == ppi.TokenOperator && tok.Value == "{" {
 		return true
 	}
 	return false
+}
+
+func prevNonTrivia(tokens []ppi.Token, idx int) int {
+	for i := idx; i >= 0; i-- {
+		switch tokens[i].Type {
+		case ppi.TokenWhitespace, ppi.TokenComment, ppi.TokenHereDocContent:
+			continue
+		default:
+			return i
+		}
+	}
+	return -1
 }
