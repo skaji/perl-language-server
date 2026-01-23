@@ -562,15 +562,25 @@ func matchMyListFromArray(tokens []ppi.Token, idx int) (string, bool) {
 		return "", false
 	}
 	i2 := nextNonTriviaToken(tokens, i1+1)
-	if i2 < 0 || tokens[i2].Type != ppi.TokenSymbol || !strings.HasPrefix(tokens[i2].Value, "$") {
+	if i2 < 0 {
 		return "", false
 	}
-	name := tokens[i2].Value
-	i3 := nextNonTriviaToken(tokens, i2+1)
-	if i3 < 0 || tokens[i3].Type != ppi.TokenOperator || tokens[i3].Value != ")" {
+	name := ""
+	close := -1
+	for i := i2; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Type == ppi.TokenOperator && tok.Value == ")" {
+			close = i
+			break
+		}
+		if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") && name == "" {
+			name = tok.Value
+		}
+	}
+	if name == "" || close < 0 {
 		return "", false
 	}
-	i4 := nextNonTriviaToken(tokens, i3+1)
+	i4 := nextNonTriviaToken(tokens, close+1)
 	if i4 < 0 || tokens[i4].Type != ppi.TokenOperator || tokens[i4].Value != "=" {
 		return "", false
 	}
