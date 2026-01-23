@@ -129,7 +129,28 @@ func TestStrictVarsDoubleDeref(t *testing.T) {
 func TestStrictVarsConfigSlice(t *testing.T) {
 	src := "use strict; use Config; $Config{foo}; @Config{'foo','bar'};"
 	doc := parseDoc(src)
-	diags := StrictVarDiagnostics(doc)
+	extra := map[string]struct{}{"%Config": {}}
+	diags := StrictVarDiagnosticsWithExtra(doc, extra)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsTodoWithTestMore(t *testing.T) {
+	src := "use strict; use Test::More; $TODO = 'todo';"
+	doc := parseDoc(src)
+	extra := map[string]struct{}{"$TODO": {}}
+	diags := StrictVarDiagnosticsWithExtra(doc, extra)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsExtraAllowlist(t *testing.T) {
+	src := "use strict; $FOO = 1;"
+	doc := parseDoc(src)
+	extra := map[string]struct{}{"$FOO": {}}
+	diags := StrictVarDiagnosticsWithExtra(doc, extra)
 	if len(diags) != 0 {
 		t.Fatalf("expected 0 diag, got %d", len(diags))
 	}

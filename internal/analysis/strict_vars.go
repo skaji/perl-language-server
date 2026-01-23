@@ -14,6 +14,12 @@ type VarDiagnostic struct {
 // StrictVarDiagnostics reports undeclared variable usages under "use strict".
 // This is a best-effort heuristic and does not attempt to fully emulate Perl.
 func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
+	return StrictVarDiagnosticsWithExtra(doc, nil)
+}
+
+// StrictVarDiagnosticsWithExtra reports undeclared variable usages under "use strict".
+// extra contains additional variable names to treat as declared.
+func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{}) []VarDiagnostic {
 	if doc == nil || doc.Root == nil {
 		return nil
 	}
@@ -21,7 +27,6 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 	if index == nil {
 		return nil
 	}
-	allowConfig := hasUseModule(doc.Root, "Config")
 	declared := collectDeclaredSymbols(index.Root)
 	var diags []VarDiagnostic
 	for i := 0; i < len(doc.Tokens); i++ {
@@ -53,10 +58,12 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if strings.HasPrefix(tok.Value, "@") && len(tok.Value) > 1 {
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
-				if allowConfig && tok.Value == "@Config" {
-					continue
-				}
 				alt := "%" + tok.Value[1:]
+				if extra != nil {
+					if _, ok := extra[alt]; ok {
+						continue
+					}
+				}
 				if isSpecialVar(alt) {
 					continue
 				}
@@ -116,10 +123,12 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if !strictAt(doc.Root, tok.Start) {
 			continue
 		}
-		if isSpecialVar(tok.Value) {
-			continue
+		if extra != nil {
+			if _, ok := extra[tok.Value]; ok {
+				continue
+			}
 		}
-		if allowConfig && (tok.Value == "$Config" || tok.Value == "%Config") {
+		if isSpecialVar(tok.Value) {
 			continue
 		}
 		if strings.Contains(tok.Value, "::") {
@@ -141,12 +150,22 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 			}
 			if allowed[0] == "%" {
 				alt := "%" + tok.Value[1:]
+				if extra != nil {
+					if _, ok := extra[alt]; ok {
+						goto declaredOK
+					}
+				}
 				if isSpecialVar(alt) {
 					goto declaredOK
 				}
 			}
 			for _, sigil := range allowed {
 				alt := sigil + tok.Value[1:]
+				if extra != nil {
+					if _, ok := extra[alt]; ok {
+						goto declaredOK
+					}
+				}
 				if isSpecialVar(alt) {
 					goto declaredOK
 				}

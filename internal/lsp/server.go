@@ -652,6 +652,33 @@ func collectUseImports(root *ppi.Node) map[string]map[string]struct{} {
 	return out
 }
 
+func collectUseModules(root *ppi.Node) map[string]struct{} {
+	if root == nil {
+		return nil
+	}
+	out := make(map[string]struct{})
+	walkNodes(root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {
+			return
+		}
+		if strings.ToLower(n.Keyword) != "use" {
+			return
+		}
+		if n.Name == "" {
+			return
+		}
+		switch n.Name {
+		case "strict", "warnings", "lib", "feature", "utf8", "parent", "base":
+			return
+		}
+		out[n.Name] = struct{}{}
+	})
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func normalizeImportName(item string) string {
 	if item == "" {
 		return ""
@@ -701,6 +728,86 @@ func filterUseImports(index *analysis.WorkspaceIndex, imports map[string]map[str
 		out[name] = symbols
 	}
 	return out
+}
+
+func (s *Server) exportedStrictVars(doc *ppi.Document, filePath string) map[string]struct{} {
+	if doc == nil || doc.Root == nil || filePath == "" {
+		return nil
+	}
+	useModules := collectUseModules(doc.Root)
+	if len(useModules) == 0 {
+		return nil
+	}
+	searchPaths := s.moduleSearchPaths(doc.Root, filePath)
+	if len(searchPaths) == 0 {
+		return nil
+	}
+	exports := make(map[string]struct{})
+	for name := range useModules {
+		modPath := findModuleFile(name, searchPaths)
+		if modPath == "" {
+			s.logger.Debug("module export lookup failed", "name", name)
+			continue
+		}
+		src, err := os.ReadFile(modPath)
+		if err != nil {
+			s.logger.Debug("module export read failed", "name", name, "error", err)
+			continue
+		}
+		modDoc := ppi.NewDocument(string(src))
+		modDoc.ParseWithDiagnostics()
+		exp := analysis.ExportedSymbols(modDoc)
+		if len(exp) == 0 {
+			continue
+		}
+		s.logger.Debug("module exports loaded", "name", name, "file", modPath, "count", len(exp))
+		for sym := range exp {
+			exports[sym] = struct{}{}
+		}
+	}
+	if len(exports) == 0 {
+		return nil
+	}
+	return exports
+}
+
+func (s *Server) moduleSearchPaths(root *ppi.Node, filePath string) []string {
+	paths := collectUseLibPaths(root, filePath)
+	dir := filepath.Dir(filePath)
+	paths = append(paths, filepath.Join(dir, "lib"))
+	paths = append(paths, filepath.Join(dir, "local", "lib", "perl5"))
+	s.workspaceMu.RLock()
+	incRoots := append([]string{}, s.incRoots...)
+	s.workspaceMu.RUnlock()
+	if len(incRoots) == 0 {
+		roots, err := perlINCPaths()
+		if err != nil {
+			s.logger.Debug("perl @INC lookup failed", "error", err)
+		} else {
+			incRoots = roots
+		}
+	}
+	paths = append(paths, incRoots...)
+	paths = filterExistingRoots(paths, s.logger)
+	return uniqueStrings(paths)
+}
+
+func findModuleFile(name string, roots []string) string {
+	if name == "" || len(roots) == 0 {
+		return ""
+	}
+	rel := strings.ReplaceAll(name, "::", string(os.PathSeparator)) + ".pm"
+	for _, root := range roots {
+		if root == "" {
+			continue
+		}
+		path := filepath.Join(root, rel)
+		info, err := os.Stat(path)
+		if err == nil && !info.IsDir() {
+			return path
+		}
+	}
+	return ""
 }
 
 func nodeNameRange(text string, node *ppi.Node) (protocol.Range, bool) {
@@ -931,7 +1038,7 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 	if doc != nil {
 		version = doc.version
 		diagnostics = toProtocolDiagnostics(doc.text, doc.parsed)
-		diagnostics = append(diagnostics, toStrictVarDiagnostics(doc.text, doc.parsed)...)
+		diagnostics = append(diagnostics, s.toStrictVarDiagnostics(uri, doc.text, doc.parsed)...)
 	}
 
 	if context != nil && context.Notify != nil {
@@ -979,8 +1086,12 @@ func toProtocolSeverity(sev ppi.DiagnosticSeverity) protocol.DiagnosticSeverity 
 	}
 }
 
-func toStrictVarDiagnostics(text string, doc *ppi.Document) []protocol.Diagnostic {
-	diags := analysis.StrictVarDiagnostics(doc)
+func (s *Server) toStrictVarDiagnostics(uri protocol.DocumentUri, text string, doc *ppi.Document) []protocol.Diagnostic {
+	var extra map[string]struct{}
+	if path, ok := uriToPath(uri); ok {
+		extra = s.exportedStrictVars(doc, path)
+	}
+	diags := analysis.StrictVarDiagnosticsWithExtra(doc, extra)
 	if len(diags) == 0 {
 		return nil
 	}
