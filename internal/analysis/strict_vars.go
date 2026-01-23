@@ -73,6 +73,9 @@ func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{})
 			}
 		}
 		if tok.Value == "@" || tok.Value == "%" {
+			if isPostDeref(doc.Tokens, i) {
+				continue
+			}
 			if isSigilDeref(doc.Tokens, i) {
 				continue
 			}
@@ -575,6 +578,14 @@ func isHashSizeDeref(tokens []ppi.Token, idx int) bool {
 		return true
 	}
 	return false
+}
+
+func isPostDeref(tokens []ppi.Token, idx int) bool {
+	prev := prevNonTrivia(tokens, idx-1)
+	if prev < 0 {
+		return false
+	}
+	return tokens[prev].Type == ppi.TokenOperator && tokens[prev].Value == "->"
 }
 
 func parseHashSizeCommentVar(value string) string {

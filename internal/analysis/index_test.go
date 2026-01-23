@@ -123,6 +123,21 @@ func TestVariablesAtUseVars(t *testing.T) {
 	}
 }
 
+func TestVariablesAtSignatureVars(t *testing.T) {
+	src := "use experimental 'signatures'; sub foo ($self, $opt, @rest) { $self; $opt; @rest }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	inside := offsetOf(t, src, "@rest }") + 1
+	vars := idx.VariablesAt(inside)
+	if !containsVar(vars, "$self") || !containsVar(vars, "$opt") || !containsVar(vars, "@rest") {
+		t.Fatalf("expected signature vars to be visible")
+	}
+}
+
 func offsetOf(t *testing.T, src, needle string) int {
 	t.Helper()
 	idx := -1

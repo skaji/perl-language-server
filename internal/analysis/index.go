@@ -53,6 +53,7 @@ func IndexDocument(doc *ppi.Document) *Index {
 
 	collectDefinitions(doc.Root, index)
 	collectVariables(doc, root)
+	collectSignatureVars(doc.Root, root)
 
 	return index
 }
@@ -101,7 +102,7 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 	declKind := ""
 	for i := 0; i < len(tokens); i++ {
 		tok := tokens[i]
-		if tok.Type == ppi.TokenWord {
+		if tok.Type == ppi.TokenWord || tok.Type == ppi.TokenAttribute {
 			switch strings.ToLower(tok.Value) {
 			case "my", "our", "state":
 				activeDecl = true
@@ -164,6 +165,47 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 	}
 }
 
+func collectSignatureVars(rootNode *ppi.Node, root *Scope) {
+	if rootNode == nil || root == nil {
+		return
+	}
+	walkNodes(rootNode, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+			return
+		}
+		if len(n.SubSigVars) == 0 {
+			return
+		}
+		start, _, ok := nodeTokenRange(n)
+		if !ok {
+			return
+		}
+		scope := findScopeByRange(root, "sub", start)
+		if scope == nil {
+			scope = scopeForOffset(root, start)
+		}
+		if scope == nil {
+			scope = root
+		}
+		for _, name := range n.SubSigVars {
+			if len(name) < 2 {
+				continue
+			}
+			if !(strings.HasPrefix(name, "$") || strings.HasPrefix(name, "@") || strings.HasPrefix(name, "%")) {
+				continue
+			}
+			sym := Symbol{
+				Name:    name,
+				Kind:    SymbolVar,
+				Storage: "my",
+				Start:   start,
+				End:     start,
+			}
+			scope.Symbols = append(scope.Symbols, sym)
+		}
+	})
+}
+
 func buildScopes(root *ppi.Node, parent *Scope) []*Scope {
 	var scopes []*Scope
 	walkNodes(root, func(n *ppi.Node) {
@@ -196,6 +238,21 @@ func buildScopes(root *ppi.Node, parent *Scope) []*Scope {
 
 	nestScopes(parent, scopes)
 	return parent.Children
+}
+
+func findScopeByRange(scope *Scope, kind string, start int) *Scope {
+	if scope == nil {
+		return nil
+	}
+	if scope.Kind == kind && scope.Start == start {
+		return scope
+	}
+	for _, child := range scope.Children {
+		if found := findScopeByRange(child, kind, start); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 func scopeForOffset(scope *Scope, offset int) *Scope {
