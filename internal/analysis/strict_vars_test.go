@@ -126,6 +126,15 @@ func TestStrictVarsDoubleDeref(t *testing.T) {
 	}
 }
 
+func TestStrictVarsDoubleDerefSpecial(t *testing.T) {
+	src := "use strict; $$_[0];"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
 func TestStrictVarsConfigSlice(t *testing.T) {
 	src := "use strict; use Config; $Config{foo}; @Config{'foo','bar'};"
 	doc := parseDoc(src)

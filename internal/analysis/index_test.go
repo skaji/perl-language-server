@@ -107,6 +107,22 @@ func TestVariablesAtOurInDocumentScope(t *testing.T) {
 	}
 }
 
+func TestVariablesAtUseVars(t *testing.T) {
+	src := "use vars qw($g $h); sub foo { $g; $h }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+
+	inside := offsetOf(t, src, "$h }") + 1
+	vars := idx.VariablesAt(inside)
+	if !containsVar(vars, "$g") || !containsVar(vars, "$h") {
+		t.Fatalf("expected use vars to declare $g and $h")
+	}
+}
+
 func offsetOf(t *testing.T, src, needle string) int {
 	t.Helper()
 	idx := -1

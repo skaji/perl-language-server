@@ -13,3 +13,10 @@ func ExportedStrictVars(doc *ppi.Document, filePath string) map[string]struct{} 
 	srv := NewServer(logger)
 	return srv.exportedStrictVars(doc, filePath)
 }
+
+// ExportedStrictVarsWithBase returns strict-vars allowlist using baseDir for relative use lib paths.
+func ExportedStrictVarsWithBase(doc *ppi.Document, filePath, baseDir string) map[string]struct{} {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	srv := NewServer(logger)
+	return srv.exportedStrictVarsWithBase(doc, filePath, baseDir)
+}

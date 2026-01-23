@@ -840,6 +840,10 @@ func filterUseImports(index *analysis.WorkspaceIndex, imports map[string]map[str
 }
 
 func (s *Server) exportedStrictVars(doc *ppi.Document, filePath string) map[string]struct{} {
+	return s.exportedStrictVarsWithBase(doc, filePath, "")
+}
+
+func (s *Server) exportedStrictVarsWithBase(doc *ppi.Document, filePath, baseDir string) map[string]struct{} {
 	if doc == nil || doc.Root == nil || filePath == "" {
 		return nil
 	}
@@ -848,7 +852,8 @@ func (s *Server) exportedStrictVars(doc *ppi.Document, filePath string) map[stri
 		return nil
 	}
 	useImports, explicitImports := collectUseSigilImports(doc.Root)
-	searchPaths := s.moduleSearchPaths(doc.Root, filePath)
+	useNames := collectUseImports(doc.Root)
+	searchPaths := s.moduleSearchPathsWithBase(doc.Root, filePath, baseDir)
 	if len(searchPaths) == 0 {
 		return nil
 	}
@@ -867,7 +872,9 @@ func (s *Server) exportedStrictVars(doc *ppi.Document, filePath string) map[stri
 	}
 	for name := range useModules {
 		if explicitImports != nil && explicitImports[name] {
-			continue
+			if !hasDefaultTag(useNames[name]) {
+				continue
+			}
 		}
 		modPath := findModuleFile(name, searchPaths)
 		if modPath == "" {
@@ -897,10 +904,17 @@ func (s *Server) exportedStrictVars(doc *ppi.Document, filePath string) map[stri
 }
 
 func (s *Server) moduleSearchPaths(root *ppi.Node, filePath string) []string {
-	paths := collectUseLibPaths(root, filePath)
-	dir := filepath.Dir(filePath)
-	paths = append(paths, filepath.Join(dir, "lib"))
-	paths = append(paths, filepath.Join(dir, "local", "lib", "perl5"))
+	return s.moduleSearchPathsWithBase(root, filePath, "")
+}
+
+func (s *Server) moduleSearchPathsWithBase(root *ppi.Node, filePath, baseDir string) []string {
+	paths := collectUseLibPathsWithBase(root, filePath, baseDir)
+	base := baseDir
+	if base == "" {
+		base = filepath.Dir(filePath)
+	}
+	paths = append(paths, filepath.Join(base, "lib"))
+	paths = append(paths, filepath.Join(base, "local", "lib", "perl5"))
 	s.workspaceMu.RLock()
 	incRoots := append([]string{}, s.incRoots...)
 	s.workspaceMu.RUnlock()
@@ -933,6 +947,19 @@ func findModuleFile(name string, roots []string) string {
 		}
 	}
 	return ""
+}
+
+func hasDefaultTag(imports map[string]struct{}) bool {
+	if len(imports) == 0 {
+		return false
+	}
+	for name := range imports {
+		switch strings.ToLower(name) {
+		case ":default":
+			return true
+		}
+	}
+	return false
 }
 
 func nodeNameRange(text string, node *ppi.Node) (protocol.Range, bool) {
@@ -1475,6 +1502,21 @@ func collectUseLibPaths(root *ppi.Node, filePath string) []string {
 		return nil
 	}
 	dir := filepath.Dir(filePath)
+	return collectUseLibPathsWithDir(root, dir)
+}
+
+func collectUseLibPathsWithBase(root *ppi.Node, filePath, baseDir string) []string {
+	if root == nil {
+		return nil
+	}
+	dir := baseDir
+	if dir == "" {
+		dir = filepath.Dir(filePath)
+	}
+	return collectUseLibPathsWithDir(root, dir)
+}
+
+func collectUseLibPathsWithDir(root *ppi.Node, dir string) []string {
 	var out []string
 	walkNodes(root, func(n *ppi.Node) {
 		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {

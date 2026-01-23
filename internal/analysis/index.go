@@ -99,12 +99,19 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 	}
 	activeDecl := false
 	declKind := ""
-	for _, tok := range tokens {
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
 		if tok.Type == ppi.TokenWord {
 			switch strings.ToLower(tok.Value) {
 			case "my", "our", "state":
 				activeDecl = true
 				declKind = strings.ToLower(tok.Value)
+			case "use":
+				next := nextNonTriviaToken(tokens, i+1)
+				if next >= 0 && tokens[next].Type == ppi.TokenWord && strings.ToLower(tokens[next].Value) == "vars" {
+					activeDecl = true
+					declKind = "our"
+				}
 			}
 		}
 		if tok.Type == ppi.TokenOperator && tok.Value == ";" {
@@ -131,6 +138,28 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 				scope = root
 			}
 			scope.Symbols = append(scope.Symbols, sym)
+		}
+		if declKind == "our" && tok.Type == ppi.TokenQuoteLike && strings.HasPrefix(tok.Value, "qw") {
+			for _, name := range splitQWNames(tok.Value) {
+				if name == "" {
+					continue
+				}
+				if !(strings.HasPrefix(name, "$") || strings.HasPrefix(name, "@") || strings.HasPrefix(name, "%")) {
+					continue
+				}
+				sym := Symbol{
+					Name:    name,
+					Kind:    SymbolVar,
+					Storage: declKind,
+					Start:   tok.Start,
+					End:     tok.End,
+				}
+				scope := scopeForOffset(root, tok.Start)
+				if scope == nil {
+					scope = root
+				}
+				scope.Symbols = append(scope.Symbols, sym)
+			}
 		}
 	}
 }
@@ -224,6 +253,38 @@ func collectVisibleSymbols(scope *Scope, offset int) []Symbol {
 		}
 	}
 	return out
+}
+
+func nextNonTriviaToken(tokens []ppi.Token, idx int) int {
+	for i := idx; i < len(tokens); i++ {
+		switch tokens[i].Type {
+		case ppi.TokenWhitespace, ppi.TokenComment, ppi.TokenHereDocContent:
+			continue
+		default:
+			return i
+		}
+	}
+	return -1
+}
+
+func splitQWNames(value string) []string {
+	if !strings.HasPrefix(value, "qw") || len(value) < 3 {
+		return nil
+	}
+	body := value[2:]
+	open := body[0]
+	close := matchingDelimiter(open)
+	if close == 0 {
+		return nil
+	}
+	content := body[1:]
+	if idx := strings.LastIndexByte(content, close); idx >= 0 {
+		content = content[:idx]
+	}
+	if content == "" {
+		return nil
+	}
+	return strings.Fields(content)
 }
 
 func walkNodes(node *ppi.Node, fn func(*ppi.Node)) {

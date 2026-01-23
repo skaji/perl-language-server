@@ -25,6 +25,14 @@ func main() {
 	if len(roots) == 0 {
 		roots = []string{"Module-Build", "ExtUtils-MakeMaker"}
 	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if base := os.Getenv("SCAN_BASE_DIR"); base != "" {
+		cwd = base
+	}
 	var diags []diag
 	visited := map[string]struct{}{}
 	for _, root := range roots {
@@ -39,7 +47,7 @@ func main() {
 			continue
 		}
 		visited[realRoot] = struct{}{}
-		err := walkRoot(realRoot, &diags, visited)
+		err := walkRoot(realRoot, cwd, &diags, visited)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
@@ -64,7 +72,7 @@ func main() {
 	}
 }
 
-func walkRoot(root string, diags *[]diag, visited map[string]struct{}) error {
+func walkRoot(root string, baseDir string, diags *[]diag, visited map[string]struct{}) error {
 	return filepath.WalkDir(root, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -80,7 +88,7 @@ func walkRoot(root string, diags *[]diag, visited map[string]struct{}) error {
 					return nil
 				}
 				visited[real] = struct{}{}
-				return walkRoot(real, diags, visited)
+				return walkRoot(real, baseDir, diags, visited)
 			}
 		}
 		if d.IsDir() {
@@ -104,7 +112,7 @@ func walkRoot(root string, diags *[]diag, visited map[string]struct{}) error {
 			line, col := lineCol(src, errd.Offset)
 			*diags = append(*diags, diag{path: path, line: line, col: col, msg: errd.Message})
 		}
-		extra := lsp.ExportedStrictVars(doc, path)
+		extra := lsp.ExportedStrictVarsWithBase(doc, path, baseDir)
 		for _, errd := range analysis.StrictVarDiagnosticsWithExtra(doc, extra) {
 			line, col := lineCol(src, errd.Offset)
 			*diags = append(*diags, diag{path: path, line: line, col: col, msg: errd.Message})

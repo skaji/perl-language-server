@@ -87,6 +87,9 @@ func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{})
 			}
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenSymbol && strings.HasPrefix(doc.Tokens[next].Value, "$") {
+				if isSpecialVar(doc.Tokens[next].Value) {
+					continue
+				}
 				if _, ok := declared.visible(doc.Tokens[next].Value, tok.Start); ok {
 					continue
 				}

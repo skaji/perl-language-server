@@ -86,6 +86,22 @@ func TestExportedStrictVarsExplicitNoSigil(t *testing.T) {
 	}
 }
 
+func TestExportedStrictVarsExplicitDefaultTag(t *testing.T) {
+	dir := filepath.Join("testdata", "exports")
+	path := filepath.Join(dir, "main_explicit_default.pl")
+	doc := parseFile(t, path)
+	srv := newTestServer()
+
+	extra := srv.exportedStrictVars(doc, path)
+	if _, ok := extra["$FOO"]; !ok {
+		t.Fatalf("expected $FOO to be exported")
+	}
+	diags := analysis.StrictVarDiagnosticsWithExtra(doc, extra)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diags, got %d", len(diags))
+	}
+}
+
 func parseFile(t *testing.T, path string) *ppi.Document {
 	t.Helper()
 	abs, err := filepath.Abs(path)
