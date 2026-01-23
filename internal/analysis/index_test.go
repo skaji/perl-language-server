@@ -153,6 +153,78 @@ func TestVariablesAtAnonSignatureVars(t *testing.T) {
 	}
 }
 
+func TestReceiverNamesFromSignature(t *testing.T) {
+	src := "sub foo ($self) { $self->bar }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	inside := offsetOf(t, src, "$self->") + 1
+	receivers := idx.ReceiverNamesAt(inside)
+	if receivers == nil {
+		t.Fatalf("expected receiver names")
+	}
+	if _, ok := receivers["$self"]; !ok {
+		t.Fatalf("expected $self to be receiver")
+	}
+}
+
+func TestReceiverNamesFromShift(t *testing.T) {
+	src := "sub foo { my $self = shift; $self->bar }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	inside := offsetOf(t, src, "$self->") + 1
+	receivers := idx.ReceiverNamesAt(inside)
+	if receivers == nil {
+		t.Fatalf("expected receiver names")
+	}
+	if _, ok := receivers["$self"]; !ok {
+		t.Fatalf("expected $self to be receiver")
+	}
+}
+
+func TestReceiverNamesFromArray(t *testing.T) {
+	src := "sub foo { my ($self) = @_; $self->bar }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	inside := offsetOf(t, src, "$self->") + 1
+	receivers := idx.ReceiverNamesAt(inside)
+	if receivers == nil {
+		t.Fatalf("expected receiver names")
+	}
+	if _, ok := receivers["$self"]; !ok {
+		t.Fatalf("expected $self to be receiver")
+	}
+}
+
+func TestReceiverNamesFromSubscript(t *testing.T) {
+	src := "sub foo { my $self = $_[0]; $self->bar }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	inside := offsetOf(t, src, "$self->") + 1
+	receivers := idx.ReceiverNamesAt(inside)
+	if receivers == nil {
+		t.Fatalf("expected receiver names")
+	}
+	if _, ok := receivers["$self"]; !ok {
+		t.Fatalf("expected $self to be receiver")
+	}
+}
+
 func offsetOf(t *testing.T, src, needle string) int {
 	t.Helper()
 	idx := -1

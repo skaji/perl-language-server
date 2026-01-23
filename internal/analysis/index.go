@@ -29,6 +29,7 @@ type Scope struct {
 	Symbols  []Symbol
 	Children []*Scope
 	Parent   *Scope
+	Receivers map[string]struct{}
 }
 
 type Index struct {
@@ -55,6 +56,7 @@ func IndexDocument(doc *ppi.Document) *Index {
 	collectVariables(doc, root)
 	collectSignatureVars(doc.Root, root)
 	collectAnonSignatureVars(doc, root)
+	collectReceiverNames(doc, root)
 
 	return index
 }
@@ -68,6 +70,19 @@ func (idx *Index) VariablesAt(offset int) []Symbol {
 		return nil
 	}
 	return collectVisibleSymbols(scope, offset)
+}
+
+func (idx *Index) ReceiverNamesAt(offset int) map[string]struct{} {
+	if idx == nil || idx.Root == nil {
+		return nil
+	}
+	scope := receiverScopeForOffset(idx.Root, offset)
+	for cur := scope; cur != nil; cur = cur.Parent {
+		if len(cur.Receivers) > 0 {
+			return cur.Receivers
+		}
+	}
+	return nil
 }
 
 func collectDefinitions(node *ppi.Node, idx *Index) {
@@ -189,6 +204,9 @@ func collectSignatureVars(rootNode *ppi.Node, root *Scope) {
 			}
 			if scope == nil {
 				scope = root
+			}
+			if len(n.SubSigParsed) > 0 {
+				addReceiver(scope, n.SubSigParsed[0].Name)
 			}
 			for _, name := range n.SubSigVars {
 				addSigVar(scope, start, name)
@@ -318,12 +336,15 @@ func collectAnonSignatureVars(doc *ppi.Document, root *Scope) {
 			continue
 		}
 		start := tokens[open].Start
-		scope := findScopeByRange(root, "block", start)
+		scope := findScopeByRange(root, "anon_sub", start)
 		if scope == nil {
 			scope = scopeForOffset(root, start)
 		}
 		if scope == nil {
 			scope = root
+		}
+		if len(sigVars) > 0 {
+			addReceiver(scope, sigVars[0])
 		}
 		for _, name := range sigVars {
 			addSigVar(scope, start, name)
@@ -392,7 +413,7 @@ func anonSubScopesFromTokens(tokens []ppi.Token) []*Scope {
 			continue
 		}
 		scopes = append(scopes, &Scope{
-			Kind:  "block",
+			Kind:  "anon_sub",
 			Start: tokens[open].Start,
 			End:   tokens[close].End,
 		})
@@ -433,6 +454,199 @@ func matchBrace(tokens []ppi.Token, open int) int {
 		}
 	}
 	return -1
+}
+
+func collectReceiverNames(doc *ppi.Document, root *Scope) {
+	if doc == nil || root == nil {
+		return
+	}
+	scopes := allScopes(root)
+	for _, scope := range scopes {
+		if scope.Kind != "sub" && scope.Kind != "anon_sub" {
+			continue
+		}
+		for _, name := range scanReceiverAssignments(doc.Tokens, scope.Start, scope.End) {
+			addReceiver(scope, name)
+		}
+	}
+}
+
+func scanReceiverAssignments(tokens []ppi.Token, start, end int) []string {
+	if len(tokens) == 0 || start >= end {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	semiCount := 0
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Start < start {
+			continue
+		}
+		if tok.Start >= end {
+			break
+		}
+		if tok.Type == ppi.TokenOperator && tok.Value == ";" {
+			semiCount++
+			if semiCount >= 5 {
+				break
+			}
+		}
+		if tok.Type != ppi.TokenWord || tok.Value != "my" {
+			continue
+		}
+		if name, ok := matchMyShift(tokens, i); ok {
+			if _, exists := seen[name]; !exists {
+				seen[name] = struct{}{}
+				out = append(out, name)
+			}
+			continue
+		}
+		if name, ok := matchMyListFromArray(tokens, i); ok {
+			if _, exists := seen[name]; !exists {
+				seen[name] = struct{}{}
+				out = append(out, name)
+			}
+			continue
+		}
+		if name, ok := matchMyFromSubscript(tokens, i); ok {
+			if _, exists := seen[name]; !exists {
+				seen[name] = struct{}{}
+				out = append(out, name)
+			}
+			continue
+		}
+	}
+	return out
+}
+
+func matchMyShift(tokens []ppi.Token, idx int) (string, bool) {
+	i1 := nextNonTriviaToken(tokens, idx+1)
+	if i1 < 0 || tokens[i1].Type != ppi.TokenSymbol || !strings.HasPrefix(tokens[i1].Value, "$") {
+		return "", false
+	}
+	name := tokens[i1].Value
+	i2 := nextNonTriviaToken(tokens, i1+1)
+	if i2 < 0 || tokens[i2].Type != ppi.TokenOperator || tokens[i2].Value != "=" {
+		return "", false
+	}
+	i3 := nextNonTriviaToken(tokens, i2+1)
+	if i3 < 0 || tokens[i3].Type != ppi.TokenWord || tokens[i3].Value != "shift" {
+		return "", false
+	}
+	i4 := nextNonTriviaToken(tokens, i3+1)
+	if i4 < 0 {
+		return name, true
+	}
+	if tokens[i4].Type == ppi.TokenOperator && (tokens[i4].Value == ";" || tokens[i4].Value == ")" || tokens[i4].Value == ",") {
+		return name, true
+	}
+	if tokens[i4].Type == ppi.TokenSymbol && tokens[i4].Value == "@_" {
+		return name, true
+	}
+	if tokens[i4].Type == ppi.TokenOperator && tokens[i4].Value == "(" {
+		i5 := nextNonTriviaToken(tokens, i4+1)
+		if i5 >= 0 && tokens[i5].Type == ppi.TokenSymbol && tokens[i5].Value == "@_" {
+			i6 := nextNonTriviaToken(tokens, i5+1)
+			if i6 >= 0 && tokens[i6].Type == ppi.TokenOperator && tokens[i6].Value == ")" {
+				return name, true
+			}
+		}
+	}
+	return "", false
+}
+
+func matchMyListFromArray(tokens []ppi.Token, idx int) (string, bool) {
+	i1 := nextNonTriviaToken(tokens, idx+1)
+	if i1 < 0 || tokens[i1].Type != ppi.TokenOperator || tokens[i1].Value != "(" {
+		return "", false
+	}
+	i2 := nextNonTriviaToken(tokens, i1+1)
+	if i2 < 0 || tokens[i2].Type != ppi.TokenSymbol || !strings.HasPrefix(tokens[i2].Value, "$") {
+		return "", false
+	}
+	name := tokens[i2].Value
+	i3 := nextNonTriviaToken(tokens, i2+1)
+	if i3 < 0 || tokens[i3].Type != ppi.TokenOperator || tokens[i3].Value != ")" {
+		return "", false
+	}
+	i4 := nextNonTriviaToken(tokens, i3+1)
+	if i4 < 0 || tokens[i4].Type != ppi.TokenOperator || tokens[i4].Value != "=" {
+		return "", false
+	}
+	i5 := nextNonTriviaToken(tokens, i4+1)
+	if i5 < 0 || tokens[i5].Type != ppi.TokenSymbol || tokens[i5].Value != "@_" {
+		return "", false
+	}
+	return name, true
+}
+
+func matchMyFromSubscript(tokens []ppi.Token, idx int) (string, bool) {
+	i1 := nextNonTriviaToken(tokens, idx+1)
+	if i1 < 0 || tokens[i1].Type != ppi.TokenSymbol || !strings.HasPrefix(tokens[i1].Value, "$") {
+		return "", false
+	}
+	name := tokens[i1].Value
+	i2 := nextNonTriviaToken(tokens, i1+1)
+	if i2 < 0 || tokens[i2].Type != ppi.TokenOperator || tokens[i2].Value != "=" {
+		return "", false
+	}
+	i3 := nextNonTriviaToken(tokens, i2+1)
+	if i3 < 0 || tokens[i3].Type != ppi.TokenSymbol || tokens[i3].Value != "$_" {
+		return "", false
+	}
+	i4 := nextNonTriviaToken(tokens, i3+1)
+	if i4 < 0 || tokens[i4].Type != ppi.TokenOperator || tokens[i4].Value != "[" {
+		return "", false
+	}
+	i5 := nextNonTriviaToken(tokens, i4+1)
+	if i5 < 0 || tokens[i5].Type != ppi.TokenNumber || tokens[i5].Value != "0" {
+		return "", false
+	}
+	i6 := nextNonTriviaToken(tokens, i5+1)
+	if i6 < 0 || tokens[i6].Type != ppi.TokenOperator || tokens[i6].Value != "]" {
+		return "", false
+	}
+	return name, true
+}
+
+func addReceiver(scope *Scope, name string) {
+	if scope == nil {
+		return
+	}
+	if name == "" || !strings.HasPrefix(name, "$") {
+		return
+	}
+	if scope.Receivers == nil {
+		scope.Receivers = make(map[string]struct{})
+	}
+	scope.Receivers[name] = struct{}{}
+}
+
+func receiverScopeForOffset(root *Scope, offset int) *Scope {
+	scope := scopeForOffset(root, offset)
+	for cur := scope; cur != nil; cur = cur.Parent {
+		if cur.Kind == "sub" || cur.Kind == "anon_sub" {
+			return cur
+		}
+	}
+	return nil
+}
+
+func allScopes(root *Scope) []*Scope {
+	if root == nil {
+		return nil
+	}
+	var out []*Scope
+	var walk func(s *Scope)
+	walk = func(s *Scope) {
+		out = append(out, s)
+		for _, child := range s.Children {
+			walk(child)
+		}
+	}
+	walk(root)
+	return out
 }
 
 func findScopeByRange(scope *Scope, kind string, start int) *Scope {
