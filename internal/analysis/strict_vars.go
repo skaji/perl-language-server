@@ -44,6 +44,12 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 		if strings.HasPrefix(tok.Value, "*") {
 			continue
 		}
+		if tok.Value == "&" || strings.HasPrefix(tok.Value, "&") {
+			continue
+		}
+		if tok.Value == "%" && isModuloOperator(doc.Tokens, i) {
+			continue
+		}
 		if strings.HasPrefix(tok.Value, "@") && len(tok.Value) > 1 {
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator && doc.Tokens[next].Value == "{" {
@@ -51,6 +57,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 					continue
 				}
 				alt := "%" + tok.Value[1:]
+				if isSpecialVar(alt) {
+					continue
+				}
 				if _, ok := declared.visible(alt, tok.Start); ok {
 					continue
 				}
@@ -87,6 +96,15 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 						continue
 					}
 				}
+			}
+		}
+		if strings.HasPrefix(tok.Value, "$#") && len(tok.Value) > 2 {
+			alt := "@" + tok.Value[2:]
+			if isSpecialVar(alt) {
+				continue
+			}
+			if _, ok := declared.visible(alt, tok.Start); ok {
+				continue
 			}
 		}
 		if tok.Value == "$" {
@@ -129,6 +147,9 @@ func StrictVarDiagnostics(doc *ppi.Document) []VarDiagnostic {
 			}
 			for _, sigil := range allowed {
 				alt := sigil + tok.Value[1:]
+				if isSpecialVar(alt) {
+					goto declaredOK
+				}
 				if _, ok := declared.visible(alt, tok.Start); ok {
 					goto declaredOK
 				}
@@ -481,6 +502,35 @@ func prevNonTrivia(tokens []ppi.Token, idx int) int {
 		}
 	}
 	return -1
+}
+
+func isModuloOperator(tokens []ppi.Token, idx int) bool {
+	prev := prevNonTrivia(tokens, idx-1)
+	next := nextNonTrivia(tokens, idx+1)
+	if prev < 0 || next < 0 {
+		return false
+	}
+	return isOperandToken(tokens[prev], true) && isOperandToken(tokens[next], false)
+}
+
+func isOperandToken(tok ppi.Token, left bool) bool {
+	switch tok.Type {
+	case ppi.TokenSymbol:
+		switch tok.Value {
+		case "$", "@", "%", "&":
+			return false
+		default:
+			return true
+		}
+	case ppi.TokenWord, ppi.TokenNumber, ppi.TokenQuote, ppi.TokenQuoteLike, ppi.TokenHereDocContent:
+		return true
+	case ppi.TokenOperator:
+		if left {
+			return tok.Value == ")" || tok.Value == "]" || tok.Value == "}"
+		}
+		return tok.Value == "(" || tok.Value == "[" || tok.Value == "{"
+	}
+	return false
 }
 
 func isHashSizeDeref(tokens []ppi.Token, idx int) bool {

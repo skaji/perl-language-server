@@ -63,6 +63,15 @@ func TestStrictVarsArrayHashScalarAccess(t *testing.T) {
 	}
 }
 
+func TestStrictVarsSpecialArrayIndex(t *testing.T) {
+	src := "use strict; $INC[-1];"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
 func TestStrictVarsArrayHashMismatch(t *testing.T) {
 	src := "use strict; my @f; my %g; $f{a}; $g[0];"
 	doc := parseDoc(src)
@@ -119,6 +128,42 @@ func TestStrictVarsDoubleDeref(t *testing.T) {
 
 func TestStrictVarsConfigSlice(t *testing.T) {
 	src := "use strict; use Config; $Config{foo}; @Config{'foo','bar'};"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsEnvSlice(t *testing.T) {
+	src := "use strict; @ENV{'foo','bar'};"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsAmpersandSub(t *testing.T) {
+	src := "use strict; &foo;"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsModuloOperator(t *testing.T) {
+	src := "use strict; my @copy; my $n; $n = @copy % 2;"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsArrayLengthToken(t *testing.T) {
+	src := "use strict; my @script_name; $#script_name;"
 	doc := parseDoc(src)
 	diags := StrictVarDiagnostics(doc)
 	if len(diags) != 0 {
