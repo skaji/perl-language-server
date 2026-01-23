@@ -20,3 +20,16 @@ func TestExportedSymbols(t *testing.T) {
 		}
 	}
 }
+
+func TestExportedSymbolsPackageExport(t *testing.T) {
+	src := "@Config::EXPORT = qw(%Config);"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	exports := ExportedSymbols(doc)
+	if len(exports) != 1 {
+		t.Fatalf("expected 1 export, got %d", len(exports))
+	}
+	if _, ok := exports["%Config"]; !ok {
+		t.Fatalf("missing export %%Config")
+	}
+}

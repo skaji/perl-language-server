@@ -22,11 +22,13 @@ func ExportedSymbols(doc *ppi.Document) map[string]struct{} {
 			return
 		}
 		pos := nextNonTrivia(tokens, 0)
-		if pos < 0 || tokens[pos].Type != ppi.TokenWord || tokens[pos].Value != "our" {
+		if pos < 0 {
 			return
 		}
-		pos = nextNonTrivia(tokens, pos+1)
-		if pos < 0 || tokens[pos].Type != ppi.TokenSymbol || tokens[pos].Value != "@EXPORT" {
+		if tokens[pos].Type == ppi.TokenWord && tokens[pos].Value == "our" {
+			pos = nextNonTrivia(tokens, pos+1)
+		}
+		if pos < 0 || tokens[pos].Type != ppi.TokenSymbol || !isExportArraySymbol(tokens[pos].Value) {
 			return
 		}
 		pos = nextNonTrivia(tokens, pos+1)
@@ -92,4 +94,14 @@ func matchingDelimiter(open byte) byte {
 	default:
 		return open
 	}
+}
+
+func isExportArraySymbol(name string) bool {
+	if name == "@EXPORT" {
+		return true
+	}
+	if !strings.HasPrefix(name, "@") {
+		return false
+	}
+	return strings.HasSuffix(name, "::EXPORT")
 }
