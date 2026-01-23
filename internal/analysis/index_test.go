@@ -138,6 +138,21 @@ func TestVariablesAtSignatureVars(t *testing.T) {
 	}
 }
 
+func TestVariablesAtAnonSignatureVars(t *testing.T) {
+	src := "my $cb = sub ($self, $opt) { $self; $opt };"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	inside := offsetOf(t, src, "$opt };") + 1
+	vars := idx.VariablesAt(inside)
+	if !containsVar(vars, "$self") || !containsVar(vars, "$opt") {
+		t.Fatalf("expected anon signature vars to be visible")
+	}
+}
+
 func offsetOf(t *testing.T, src, needle string) int {
 	t.Helper()
 	idx := -1

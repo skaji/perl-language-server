@@ -48,12 +48,13 @@ func IndexDocument(doc *ppi.Document) *Index {
 	}
 	index := &Index{Root: root}
 
-	scopes := buildScopes(doc.Root, root)
+	scopes := buildScopes(doc.Root, root, doc.Tokens)
 	root.Children = scopes
 
 	collectDefinitions(doc.Root, index)
 	collectVariables(doc, root)
 	collectSignatureVars(doc.Root, root)
+	collectAnonSignatureVars(doc, root)
 
 	return index
 }
@@ -170,43 +171,167 @@ func collectSignatureVars(rootNode *ppi.Node, root *Scope) {
 		return
 	}
 	walkNodes(rootNode, func(n *ppi.Node) {
-		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+		if n == nil || n.Type != ppi.NodeStatement {
 			return
 		}
-		if len(n.SubSigVars) == 0 {
-			return
+		switch n.Kind {
+		case "statement::sub":
+			if len(n.SubSigVars) == 0 {
+				return
+			}
+			start, _, ok := nodeTokenRange(n)
+			if !ok {
+				return
+			}
+			scope := findScopeByRange(root, "sub", start)
+			if scope == nil {
+				scope = scopeForOffset(root, start)
+			}
+			if scope == nil {
+				scope = root
+			}
+			for _, name := range n.SubSigVars {
+				addSigVar(scope, start, name)
+			}
 		}
-		start, _, ok := nodeTokenRange(n)
-		if !ok {
-			return
+	})
+}
+
+func addSigVar(scope *Scope, start int, name string) {
+	if scope == nil {
+		return
+	}
+	if len(name) < 2 {
+		return
+	}
+	if !(strings.HasPrefix(name, "$") || strings.HasPrefix(name, "@") || strings.HasPrefix(name, "%")) {
+		return
+	}
+	sym := Symbol{
+		Name:    name,
+		Kind:    SymbolVar,
+		Storage: "my",
+		Start:   start,
+		End:     start,
+	}
+	scope.Symbols = append(scope.Symbols, sym)
+}
+
+func anonSubSignatureVars(tokens []ppi.Token) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Type != ppi.TokenWord || tok.Value != "sub" {
+			continue
 		}
-		scope := findScopeByRange(root, "sub", start)
+		next := nextNonTrivia(tokens, i+1)
+		if next < 0 {
+			continue
+		}
+		if tokens[next].Type == ppi.TokenWord {
+			continue
+		}
+		if tokens[next].Type != ppi.TokenPrototype {
+			continue
+		}
+		return signatureVarsFromPrototype(tokens[next].Value)
+	}
+	return nil
+}
+
+func signatureVarsFromPrototype(proto string) []string {
+	if proto == "" {
+		return nil
+	}
+	if proto[0] != '(' || proto[len(proto)-1] != ')' {
+		return nil
+	}
+	body := strings.TrimSpace(proto[1 : len(proto)-1])
+	if body == "" {
+		return nil
+	}
+	parts := strings.Split(body, ",")
+	var vars []string
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		for i := 0; i < len(p); i++ {
+			if p[i] != '$' && p[i] != '@' && p[i] != '%' {
+				continue
+			}
+			j := i + 1
+			for j < len(p) && (isWordStart(p[j]) || isDigit(p[j]) || p[j] == '_') {
+				j++
+			}
+			if j == i+1 {
+				continue
+			}
+			vars = append(vars, p[i:j])
+			break
+		}
+	}
+	return vars
+}
+
+func isWordStart(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')
+}
+
+func isDigit(ch byte) bool {
+	return ch >= '0' && ch <= '9'
+}
+
+func collectAnonSignatureVars(doc *ppi.Document, root *Scope) {
+	if doc == nil || root == nil {
+		return
+	}
+	tokens := doc.Tokens
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Type != ppi.TokenWord || tok.Value != "sub" {
+			continue
+		}
+		next := nextNonTrivia(tokens, i+1)
+		if next < 0 {
+			continue
+		}
+		if tokens[next].Type == ppi.TokenWord {
+			continue
+		}
+		if tokens[next].Type != ppi.TokenPrototype {
+			continue
+		}
+		sigVars := signatureVarsFromPrototype(tokens[next].Value)
+		if len(sigVars) == 0 {
+			continue
+		}
+		open := nextOperator(tokens, next+1, "{")
+		if open < 0 {
+			continue
+		}
+		close := matchBrace(tokens, open)
+		if close < 0 {
+			continue
+		}
+		start := tokens[open].Start
+		scope := findScopeByRange(root, "block", start)
 		if scope == nil {
 			scope = scopeForOffset(root, start)
 		}
 		if scope == nil {
 			scope = root
 		}
-		for _, name := range n.SubSigVars {
-			if len(name) < 2 {
-				continue
-			}
-			if !(strings.HasPrefix(name, "$") || strings.HasPrefix(name, "@") || strings.HasPrefix(name, "%")) {
-				continue
-			}
-			sym := Symbol{
-				Name:    name,
-				Kind:    SymbolVar,
-				Storage: "my",
-				Start:   start,
-				End:     start,
-			}
-			scope.Symbols = append(scope.Symbols, sym)
+		for _, name := range sigVars {
+			addSigVar(scope, start, name)
 		}
-	})
+	}
 }
 
-func buildScopes(root *ppi.Node, parent *Scope) []*Scope {
+func buildScopes(root *ppi.Node, parent *Scope, tokens []ppi.Token) []*Scope {
 	var scopes []*Scope
 	walkNodes(root, func(n *ppi.Node) {
 		if n == nil {
@@ -236,8 +361,78 @@ func buildScopes(root *ppi.Node, parent *Scope) []*Scope {
 		}
 	})
 
+	if len(tokens) > 0 {
+		scopes = append(scopes, anonSubScopesFromTokens(tokens)...)
+	}
+
 	nestScopes(parent, scopes)
 	return parent.Children
+}
+
+func anonSubScopesFromTokens(tokens []ppi.Token) []*Scope {
+	var scopes []*Scope
+	for i := 0; i < len(tokens); i++ {
+		tok := tokens[i]
+		if tok.Type != ppi.TokenWord || tok.Value != "sub" {
+			continue
+		}
+		next := nextNonTrivia(tokens, i+1)
+		if next < 0 {
+			continue
+		}
+		if tokens[next].Type == ppi.TokenWord {
+			continue
+		}
+		open := nextOperator(tokens, next+1, "{")
+		if open < 0 {
+			continue
+		}
+		close := matchBrace(tokens, open)
+		if close < 0 {
+			continue
+		}
+		scopes = append(scopes, &Scope{
+			Kind:  "block",
+			Start: tokens[open].Start,
+			End:   tokens[close].End,
+		})
+		i = close
+	}
+	return scopes
+}
+
+func nextOperator(tokens []ppi.Token, start int, op string) int {
+	for i := start; i < len(tokens); i++ {
+		if tokens[i].Type == ppi.TokenOperator && tokens[i].Value == op {
+			return i
+		}
+	}
+	return -1
+}
+
+func matchBrace(tokens []ppi.Token, open int) int {
+	if open < 0 || open >= len(tokens) {
+		return -1
+	}
+	if tokens[open].Type != ppi.TokenOperator || tokens[open].Value != "{" {
+		return -1
+	}
+	depth := 0
+	for i := open; i < len(tokens); i++ {
+		if tokens[i].Type != ppi.TokenOperator {
+			continue
+		}
+		switch tokens[i].Value {
+		case "{":
+			depth++
+		case "}":
+			depth--
+			if depth == 0 {
+				return i
+			}
+		}
+	}
+	return -1
 }
 
 func findScopeByRange(scope *Scope, kind string, start int) *Scope {
