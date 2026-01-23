@@ -326,6 +326,17 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	}
 
 	offset := params.Position.IndexIn(doc.text)
+	if methodPrefix, start, ok := selfMethodPrefix(doc.text, offset); ok {
+		pkg := doc.parsed.PackageAt(offset)
+		methods := methodsForPackage(doc.parsed, pkg)
+		items := methodCompletionItems(methods, methodPrefix, doc.text, start, offset)
+		s.logger.Debug("completion resolved", "prefix", methodPrefix, "count", len(items), "method", true, "package", pkg)
+		return protocol.CompletionList{
+			IsIncomplete: false,
+			Items:        items,
+		}, nil
+	}
+
 	prefix := completionPrefix(doc.text, offset)
 	vars := []analysis.Symbol{}
 	if doc.index != nil {
@@ -1125,6 +1136,107 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string, r
 	})
 
 	return items
+}
+
+func methodCompletionItems(methods []string, prefix string, text string, start int, offset int) []protocol.CompletionItem {
+	if len(methods) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	items := make([]protocol.CompletionItem, 0, len(methods))
+	rng := protocol.Range{
+		Start: positionFromOffset(text, start),
+		End:   positionFromOffset(text, offset),
+	}
+	for _, name := range methods {
+		if name == "" || !strings.HasPrefix(name, prefix) {
+			continue
+		}
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		k := protocol.CompletionItemKindMethod
+		d := "method"
+		items = append(items, protocol.CompletionItem{
+			Label:    name,
+			Kind:     &k,
+			Detail:   &d,
+			TextEdit: &protocol.TextEdit{Range: rng, NewText: name},
+		})
+	}
+	return items
+}
+
+func methodsForPackage(doc *ppi.Document, pkg string) []string {
+	if doc == nil || doc.Root == nil {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	out := []string{}
+	walkNodes(doc.Root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+			return
+		}
+		if n.Name == "" {
+			return
+		}
+		start, _, ok := nodeTokenRange(n)
+		if !ok {
+			return
+		}
+		p := doc.PackageAt(start)
+		if p != pkg {
+			return
+		}
+		if _, ok := seen[n.Name]; ok {
+			return
+		}
+		seen[n.Name] = struct{}{}
+		out = append(out, n.Name)
+	})
+	return out
+}
+
+func selfMethodPrefix(text string, offset int) (string, int, bool) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(text) {
+		offset = len(text)
+	}
+	end := offset
+	start := end
+	for start > 0 {
+		ch := text[start-1]
+		if (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' {
+			start--
+			continue
+		}
+		break
+	}
+	prefix := text[start:end]
+	i := start
+	for i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') {
+		i--
+	}
+	if i < 2 || text[i-2:i] != "->" {
+		return "", 0, false
+	}
+	i -= 2
+	for i > 0 && (text[i-1] == ' ' || text[i-1] == '\t') {
+		i--
+	}
+	if i < 5 || text[i-5:i] != "$self" {
+		return "", 0, false
+	}
+	if i > 5 {
+		prev := text[i-6]
+		if (prev >= 'a' && prev <= 'z') || (prev >= 'A' && prev <= 'Z') || (prev >= '0' && prev <= '9') || prev == '_' || prev == ':' || prev == '$' {
+			return "", 0, false
+		}
+	}
+	return prefix, start, true
 }
 
 func perlKeywords() []string {
