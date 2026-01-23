@@ -228,6 +228,15 @@ func TestStrictVarsArrayLengthToken(t *testing.T) {
 	}
 }
 
+func TestStrictVarsMethodSignatureReceiver(t *testing.T) {
+	src := "use v5.36; sub foo :method ($class) { $class }"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
 func parseDoc(src string) *ppi.Document {
 	doc := ppi.NewDocument(src)
 	doc.ParseWithDiagnostics()
