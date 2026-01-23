@@ -652,6 +652,115 @@ func collectUseImports(root *ppi.Node) map[string]map[string]struct{} {
 	return out
 }
 
+func collectUseSigilImports(root *ppi.Node) (map[string]map[string]struct{}, map[string]bool) {
+	if root == nil {
+		return nil, nil
+	}
+	imports := make(map[string]map[string]struct{})
+	explicit := make(map[string]bool)
+	walkNodes(root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::include" {
+			return
+		}
+		if strings.ToLower(n.Keyword) != "use" {
+			return
+		}
+		if n.Name == "" {
+			return
+		}
+		if n.ImportKind != "" {
+			explicit[n.Name] = true
+		}
+		if len(n.ImportList) == 0 {
+			return
+		}
+		items := importSigilItems(n.ImportList, n.ImportKind)
+		if len(items) == 0 {
+			return
+		}
+		set := imports[n.Name]
+		if set == nil {
+			set = make(map[string]struct{})
+			imports[n.Name] = set
+		}
+		for _, item := range items {
+			set[item] = struct{}{}
+		}
+	})
+	if len(imports) == 0 {
+		imports = nil
+	}
+	if len(explicit) == 0 {
+		explicit = nil
+	}
+	return imports, explicit
+}
+
+func importSigilItems(tokens []ppi.Token, kind string) []string {
+	if len(tokens) == 0 {
+		return nil
+	}
+	if kind == "qw" && len(tokens) == 1 && tokens[0].Type == ppi.TokenQuoteLike {
+		return sigilsFromQW(tokens[0].Value)
+	}
+	var items []string
+	for _, tok := range tokens {
+		switch tok.Type {
+		case ppi.TokenSymbol:
+			if len(tok.Value) > 1 && (strings.HasPrefix(tok.Value, "$") || strings.HasPrefix(tok.Value, "@") || strings.HasPrefix(tok.Value, "%")) {
+				items = append(items, tok.Value)
+			}
+		case ppi.TokenQuote:
+			val := strings.Trim(tok.Value, "\"'`")
+			if len(val) > 1 && (strings.HasPrefix(val, "$") || strings.HasPrefix(val, "@") || strings.HasPrefix(val, "%")) {
+				items = append(items, val)
+			}
+		}
+	}
+	return items
+}
+
+func sigilsFromQW(value string) []string {
+	if !strings.HasPrefix(value, "qw") || len(value) < 3 {
+		return nil
+	}
+	body := value[2:]
+	open := body[0]
+	close := matchingDelimiter(open)
+	if close == 0 {
+		return nil
+	}
+	content := body[1:]
+	if idx := strings.LastIndexByte(content, close); idx >= 0 {
+		content = content[:idx]
+	}
+	if content == "" {
+		return nil
+	}
+	var items []string
+	for _, field := range strings.Fields(content) {
+		if len(field) > 1 && (strings.HasPrefix(field, "$") || strings.HasPrefix(field, "@") || strings.HasPrefix(field, "%")) {
+			items = append(items, field)
+		}
+	}
+	return items
+}
+
+func matchingDelimiter(open byte) byte {
+	switch open {
+	case '(':
+		return ')'
+	case '[':
+		return ']'
+	case '{':
+		return '}'
+	case '<':
+		return '>'
+	default:
+		return open
+	}
+}
+
 func collectUseModules(root *ppi.Node) map[string]struct{} {
 	if root == nil {
 		return nil
@@ -738,12 +847,28 @@ func (s *Server) exportedStrictVars(doc *ppi.Document, filePath string) map[stri
 	if len(useModules) == 0 {
 		return nil
 	}
+	useImports, explicitImports := collectUseSigilImports(doc.Root)
 	searchPaths := s.moduleSearchPaths(doc.Root, filePath)
 	if len(searchPaths) == 0 {
 		return nil
 	}
 	exports := make(map[string]struct{})
+	for name, items := range useImports {
+		if len(items) == 0 {
+			continue
+		}
+		if explicitImports != nil {
+			if explicitImports[name] {
+				for sym := range items {
+					exports[sym] = struct{}{}
+				}
+			}
+		}
+	}
 	for name := range useModules {
+		if explicitImports != nil && explicitImports[name] {
+			continue
+		}
 		modPath := findModuleFile(name, searchPaths)
 		if modPath == "" {
 			s.logger.Debug("module export lookup failed", "name", name)
