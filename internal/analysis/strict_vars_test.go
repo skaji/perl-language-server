@@ -144,6 +144,24 @@ func TestStrictVarsPostDerefSigils(t *testing.T) {
 	}
 }
 
+func TestStrictVarsTest2ToolsTargetClass(t *testing.T) {
+	src := "use strict; use Test2::Tools::Target 'Foo'; $CLASS->import();"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsDoubleQuoteSpecial(t *testing.T) {
+	src := "use strict; local($\\, $\", $,);"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
 func TestStrictVarsConfigSlice(t *testing.T) {
 	src := "use strict; use Config; $Config{foo}; @Config{'foo','bar'};"
 	doc := parseDoc(src)

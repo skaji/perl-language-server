@@ -27,6 +27,7 @@ func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{})
 	if index == nil {
 		return nil
 	}
+	allowClass := hasUseModule(doc.Root, "Test2::Tools::Target")
 	declared := collectDeclaredSymbols(index.Root)
 	var diags []VarDiagnostic
 	for i := 0; i < len(doc.Tokens); i++ {
@@ -135,6 +136,9 @@ func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{})
 			}
 		}
 		if isSpecialVar(tok.Value) {
+			continue
+		}
+		if allowClass && tok.Value == "$CLASS" {
 			continue
 		}
 		if strings.Contains(tok.Value, "::") {
@@ -403,7 +407,7 @@ func isSpecialVar(name string) bool {
 	}
 	switch name {
 	case "$_", "$.", "$/", "$,", "$\\", "$|", "$%", "$=", "$-", "$~",
-		"$^", "$:", "$?", "$!", "$@", "$$", "$<", "$>", "$[", "$]", "$;",
+		"$^", "$:", "$?", "$!", "$@", "$$", "$<", "$>", "$[", "$]", "$;", "$\"", "$'", "$`",
 		"$^L", "$^A", "$^E", "$^F", "$^H", "$^I", "$^M", "$^O", "$^P",
 		"$^R", "$^S", "$^T", "$^V", "$^W", "$^X", "$^CHILD_ERROR_NATIVE",
 		"$ARGV", "$ARGVOUT", "$LAST_PAREN_MATCH", "$LAST_SUBMATCH_RESULT",
@@ -420,6 +424,8 @@ func isSpecialVar(name string) bool {
 	case "@ARGV", "@INC", "@_", "@EXPORT", "@EXPORT_OK", "@ISA", "@F":
 		return true
 	case "%ENV", "%SIG", "%INC", "%ARGV", "%EXPORT_TAGS":
+		return true
+	case "%^H":
 		return true
 	}
 	if name[0] == '$' && len(name) == 2 {

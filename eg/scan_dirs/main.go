@@ -77,6 +77,27 @@ func walkRoot(root string, baseDir string, diags *[]diag, visited map[string]str
 		if err != nil {
 			return err
 		}
+		rel, relErr := filepath.Rel(root, path)
+		if relErr != nil {
+			return relErr
+		}
+		parts := strings.Split(rel, string(filepath.Separator))
+		if rel != "." && len(parts) > 0 {
+			switch parts[0] {
+			case "lib", "t":
+				// allowed roots
+			case "blib", "share":
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			default:
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
 		if d.Type()&os.ModeSymlink != 0 {
 			info, err := os.Stat(path)
 			if err == nil && info.IsDir() {
@@ -105,7 +126,7 @@ func walkRoot(root string, baseDir string, diags *[]diag, visited map[string]str
 		if err != nil {
 			return err
 		}
-		src := string(data)
+		src := stripAfterData(string(data))
 		doc := ppi.NewDocument(src)
 		doc.ParseWithDiagnostics()
 		for _, errd := range doc.Errors {
@@ -119,6 +140,21 @@ func walkRoot(root string, baseDir string, diags *[]diag, visited map[string]str
 		}
 		return nil
 	})
+}
+
+func stripAfterData(src string) string {
+	lineStart := 0
+	for i := 0; i <= len(src); i++ {
+		if i == len(src) || src[i] == '\n' {
+			line := src[lineStart:i]
+			trimmed := strings.TrimLeft(line, " \t")
+			if strings.HasPrefix(trimmed, "__DATA__") || strings.HasPrefix(trimmed, "__END__") {
+				return src[:lineStart]
+			}
+			lineStart = i + 1
+		}
+	}
+	return src
 }
 
 func lineCol(text string, offset int) (int, int) {
