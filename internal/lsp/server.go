@@ -257,6 +257,20 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 }
 
 func hoverVarSigType(doc *documentData, offset int, name string, logger *slog.Logger) string {
+	sig := varTypeSigAt(doc, offset, name)
+	if sig == "" {
+		if logger != nil {
+			logger.Debug("hover sig missing", "name", name)
+		}
+		return ""
+	}
+	if logger != nil {
+		logger.Debug("hover sig resolved", "name", name, "sig", sig)
+	}
+	return sig
+}
+
+func varTypeSigAt(doc *documentData, offset int, name string) string {
 	if doc == nil || doc.parsed == nil || doc.index == nil {
 		return ""
 	}
@@ -277,18 +291,9 @@ func hoverVarSigType(doc *documentData, offset int, name string, logger *slog.Lo
 	}
 	if sig == "" {
 		sig = sigArgTypeAt(doc, offset, name)
-		if sig == "" {
-			if logger != nil {
-				logger.Debug("hover sig missing", "name", name)
-			}
-			return ""
-		}
 	}
 	if strings.Contains(sig, "->") {
 		return ""
-	}
-	if logger != nil {
-		logger.Debug("hover sig resolved", "name", name, "sig", sig)
 	}
 	return sig
 }
@@ -678,13 +683,10 @@ func (s *Server) typeDefinition(_ *glsp.Context, params *protocol.TypeDefinition
 			s.logger.Debug("typeDefinition skipped: short symbol", "token", token.Value)
 			return nil, nil
 		}
-		sig = varSigTypeAt(doc, offset, token.Value)
-		if sig == "" {
-			sig = sigArgTypeAt(doc, offset, token.Value)
-		}
+		sig = varTypeSigAt(doc, offset, token.Value)
 	case ppi.TokenPrototype:
 		if name := prototypeVarAt(token.Value, offset-token.Start); name != "" {
-			sig = sigArgTypeAt(doc, offset, name)
+			sig = varTypeSigAt(doc, offset, name)
 		}
 	default:
 		s.logger.Debug("typeDefinition skipped: non-symbol token", "token", token.Value, "type", token.Type)
@@ -723,7 +725,7 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 		pkg := ""
 		if _, ok := receivers[recv]; ok {
 			pkg = doc.parsed.PackageAt(offset)
-		} else if sig := varSigTypeAt(doc, offset, recv); sig != "" {
+		} else if sig := varTypeSigAt(doc, offset, recv); sig != "" {
 			if class, ok := classNameFromSig(sig); ok {
 				pkg = class
 			}
