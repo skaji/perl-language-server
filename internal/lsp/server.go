@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -345,6 +346,15 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 		}
 	}
 	if idx < 0 || idx >= len(args) {
+		if len(vars) == 0 {
+			if subStart, subEnd, ok := subNodeRange(node); ok {
+				if ai, ok := argIndexFromAssignments(doc.parsed.Tokens, subStart, subEnd, offset, name); ok {
+					if ai >= 0 && ai < len(args) {
+						return args[ai]
+					}
+				}
+			}
+		}
 		if len(args) > 0 && doc.index != nil {
 			if receivers := doc.index.ReceiverNamesAt(offset); receivers != nil {
 				if _, ok := receivers[name]; ok {
@@ -355,6 +365,126 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 		return ""
 	}
 	return args[idx]
+}
+
+func argIndexFromAssignments(tokens []ppi.Token, start, end, offset int, name string) (int, bool) {
+	if len(tokens) == 0 || start >= end || name == "" {
+		return -1, false
+	}
+	for i, tok := range tokens {
+		if tok.Start < start {
+			continue
+		}
+		if tok.Start >= end || tok.Start > offset {
+			break
+		}
+		if tok.Type != ppi.TokenWord || tok.Value != "my" {
+			continue
+		}
+		vars, next, ok := parseMyVarList(tokens, i+1)
+		if !ok || len(vars) == 0 {
+			continue
+		}
+		assign := nextNonTriviaTokenLocal(tokens, next)
+		if assign < 0 || tokens[assign].Type != ppi.TokenOperator || tokens[assign].Value != "=" {
+			continue
+		}
+		rhs := nextNonTriviaTokenLocal(tokens, assign+1)
+		if rhs < 0 {
+			continue
+		}
+		switch tokens[rhs].Type {
+		case ppi.TokenWord:
+			if tokens[rhs].Value == "shift" {
+				if idx := indexOfVar(vars, name); idx >= 0 {
+					return idx, true
+				}
+			}
+		case ppi.TokenSymbol:
+			if tokens[rhs].Value == "@_" {
+				if idx := indexOfVar(vars, name); idx >= 0 {
+					return idx, true
+				}
+			}
+			if tokens[rhs].Value == "$_" {
+				if idx, ok := matchArgFromSubscript(tokens, rhs+1); ok {
+					if len(vars) == 1 && vars[0] == name {
+						return idx, true
+					}
+				}
+			}
+		}
+	}
+	return -1, false
+}
+
+func parseMyVarList(tokens []ppi.Token, idx int) ([]string, int, bool) {
+	i := nextNonTriviaTokenLocal(tokens, idx)
+	if i < 0 {
+		return nil, -1, false
+	}
+	switch tokens[i].Type {
+	case ppi.TokenSymbol:
+		if strings.HasPrefix(tokens[i].Value, "$") {
+			return []string{tokens[i].Value}, i + 1, true
+		}
+	case ppi.TokenOperator:
+		if tokens[i].Value != "(" {
+			return nil, -1, false
+		}
+		var out []string
+		for j := i + 1; j < len(tokens); j++ {
+			tok := tokens[j]
+			if tok.Type == ppi.TokenOperator && tok.Value == ")" {
+				return out, j + 1, len(out) > 0
+			}
+			if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") {
+				out = append(out, tok.Value)
+			}
+		}
+	}
+	return nil, -1, false
+}
+
+func matchArgFromSubscript(tokens []ppi.Token, idx int) (int, bool) {
+	i1 := nextNonTriviaTokenLocal(tokens, idx)
+	if i1 < 0 || tokens[i1].Type != ppi.TokenOperator || tokens[i1].Value != "[" {
+		return -1, false
+	}
+	i2 := nextNonTriviaTokenLocal(tokens, i1+1)
+	if i2 < 0 || tokens[i2].Type != ppi.TokenNumber {
+		return -1, false
+	}
+	i3 := nextNonTriviaTokenLocal(tokens, i2+1)
+	if i3 < 0 || tokens[i3].Type != ppi.TokenOperator || tokens[i3].Value != "]" {
+		return -1, false
+	}
+	n, err := strconv.Atoi(tokens[i2].Value)
+	if err != nil {
+		return -1, false
+	}
+	return n, true
+}
+
+func indexOfVar(vars []string, name string) int {
+	for i, v := range vars {
+		if v == name {
+			return i
+		}
+	}
+	return -1
+}
+
+func nextNonTriviaTokenLocal(tokens []ppi.Token, idx int) int {
+	for i := idx; i < len(tokens); i++ {
+		switch tokens[i].Type {
+		case ppi.TokenWhitespace, ppi.TokenComment, ppi.TokenHereDocContent:
+			continue
+		default:
+			return i
+		}
+	}
+	return -1
 }
 
 func signatureVarsFromPrototypeToken(tokens []ppi.Token) []string {
@@ -532,7 +662,11 @@ func sigCommentBeforeOffset(text string, offset int) string {
 		return ""
 	}
 	line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
-	if !strings.HasPrefix(line, ":SIG") {
+	if body, ok := strings.CutPrefix(line, ":SIG"); ok {
+		line = strings.TrimSpace(body)
+	} else if body, ok := strings.CutPrefix(line, "SIG"); ok {
+		line = strings.TrimSpace(body)
+	} else {
 		return ""
 	}
 	open := strings.IndexByte(line, '(')
