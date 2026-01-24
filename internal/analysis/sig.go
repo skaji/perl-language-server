@@ -1,0 +1,207 @@
+package analysis
+
+import (
+	"fmt"
+	"strings"
+)
+
+// ValidateSig validates the contents inside :SIG(...).
+// It returns nil if the signature is syntactically valid.
+func ValidateSig(sig string) error {
+	s := strings.TrimSpace(sig)
+	if s == "" {
+		return fmt.Errorf("empty signature")
+	}
+	if left, right, ok := splitTopLevelArrow(s); ok {
+		if err := validateArgList(left); err != nil {
+			return fmt.Errorf("invalid args: %w", err)
+		}
+		if err := validateRetList(right); err != nil {
+			return fmt.Errorf("invalid return: %w", err)
+		}
+		return nil
+	}
+	if err := validateType(s, false); err != nil {
+		return err
+	}
+	return nil
+}
+
+func splitTopLevelArrow(s string) (string, string, bool) {
+	depthParen := 0
+	depthBracket := 0
+	for i := 0; i+1 < len(s); i++ {
+		ch := s[i]
+		switch ch {
+		case '(':
+			depthParen++
+		case ')':
+			if depthParen > 0 {
+				depthParen--
+			}
+		case '[':
+			depthBracket++
+		case ']':
+			if depthBracket > 0 {
+				depthBracket--
+			}
+		case '-':
+			if s[i+1] == '>' && depthParen == 0 && depthBracket == 0 {
+				left := strings.TrimSpace(s[:i])
+				right := strings.TrimSpace(s[i+2:])
+				if left == "" || right == "" {
+					return "", "", false
+				}
+				return left, right, true
+			}
+		}
+	}
+	return "", "", false
+}
+
+func validateArgList(s string) error {
+	return validateTypeList(s, true)
+}
+
+func validateRetList(s string) error {
+	return validateTypeList(s, true)
+}
+
+func validateTypeList(s string, allowVoid bool) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("empty list")
+	}
+	if s == "void" || s == "(void)" {
+		if !allowVoid {
+			return fmt.Errorf("void not allowed")
+		}
+		return nil
+	}
+	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+		body := strings.TrimSpace(s[1 : len(s)-1])
+		if body == "" {
+			return fmt.Errorf("empty list")
+		}
+		parts := splitTopLevel(body, ',')
+		if len(parts) < 2 {
+			if err := validateType(strings.TrimSpace(body), allowVoid); err != nil {
+				return err
+			}
+			return nil
+		}
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			if part == "" {
+				return fmt.Errorf("empty type")
+			}
+			if err := validateType(part, allowVoid); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if strings.Contains(s, ",") {
+		return fmt.Errorf("multiple types require parentheses")
+	}
+	return validateType(s, allowVoid)
+}
+
+func validateType(s string, allowVoid bool) error {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return fmt.Errorf("empty type")
+	}
+	switch s {
+	case "any", "int", "undef":
+		return nil
+	case "void":
+		if allowVoid {
+			return nil
+		}
+		return fmt.Errorf("void not allowed here")
+	}
+	if strings.HasPrefix(s, "array[") && strings.HasSuffix(s, "]") {
+		inner := strings.TrimSpace(s[len("array[") : len(s)-1])
+		if inner == "" {
+			return fmt.Errorf("array[] missing type")
+		}
+		return validateType(inner, allowVoid)
+	}
+	if strings.HasPrefix(s, "hash[") && strings.HasSuffix(s, "]") {
+		inner := strings.TrimSpace(s[len("hash[") : len(s)-1])
+		if inner == "" {
+			return fmt.Errorf("hash[] missing type")
+		}
+		return validateType(inner, allowVoid)
+	}
+	if isClassName(s) {
+		return nil
+	}
+	return fmt.Errorf("unknown type %q", s)
+}
+
+func splitTopLevel(s string, sep byte) []string {
+	var out []string
+	depthParen := 0
+	depthBracket := 0
+	start := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depthParen++
+		case ')':
+			if depthParen > 0 {
+				depthParen--
+			}
+		case '[':
+			depthBracket++
+		case ']':
+			if depthBracket > 0 {
+				depthBracket--
+			}
+		case sep:
+			if depthParen == 0 && depthBracket == 0 {
+				out = append(out, s[start:i])
+				start = i + 1
+			}
+		}
+	}
+	out = append(out, s[start:])
+	return out
+}
+
+func isClassName(s string) bool {
+	if s == "" {
+		return false
+	}
+	parts := strings.Split(s, "::")
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		if !isIdent(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func isIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if i == 0 {
+			if !(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+				return false
+			}
+			continue
+		}
+		if !(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			return false
+		}
+	}
+	return true
+}

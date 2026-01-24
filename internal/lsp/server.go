@@ -1428,6 +1428,7 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 		version = doc.version
 		diagnostics = toProtocolDiagnostics(doc.text, doc.parsed)
 		diagnostics = append(diagnostics, s.toStrictVarDiagnostics(uri, doc.text, doc.parsed)...)
+		diagnostics = append(diagnostics, sigDiagnostics(doc.text)...)
 	}
 
 	if context != nil && context.Notify != nil {
@@ -1444,6 +1445,55 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 		Version:     version,
 		Diagnostics: diagnostics,
 	}
+}
+
+func sigDiagnostics(text string) []protocol.Diagnostic {
+	var out []protocol.Diagnostic
+	if text == "" {
+		return nil
+	}
+	source := "perl-lsp"
+	sev := protocol.DiagnosticSeverityError
+	offset := 0
+	for offset < len(text) {
+		lineStart := offset
+		lineEnd := len(text)
+		if idx := strings.IndexByte(text[offset:], '\n'); idx >= 0 {
+			lineEnd = offset + idx
+		}
+		line := text[lineStart:lineEnd]
+		trim := strings.TrimSpace(line)
+		if strings.HasPrefix(trim, "#") {
+			body := strings.TrimSpace(strings.TrimPrefix(trim, "#"))
+			if strings.HasPrefix(body, ":SIG") {
+				open := strings.IndexByte(body, '(')
+				close := strings.LastIndexByte(body, ')')
+				if open < 0 || close < open+1 {
+					out = append(out, protocol.Diagnostic{
+						Range:    protocol.Range{Start: positionFromOffset(text, lineStart), End: positionFromOffset(text, lineEnd)},
+						Severity: &sev,
+						Source:   &source,
+						Message:  "invalid :SIG(...)",
+					})
+				} else {
+					sig := strings.TrimSpace(body[open+1 : close])
+					if err := analysis.ValidateSig(sig); err != nil {
+						out = append(out, protocol.Diagnostic{
+							Range:    protocol.Range{Start: positionFromOffset(text, lineStart), End: positionFromOffset(text, lineEnd)},
+							Severity: &sev,
+							Source:   &source,
+							Message:  "invalid :SIG(...): " + err.Error(),
+						})
+					}
+				}
+			}
+		}
+		if lineEnd >= len(text) {
+			break
+		}
+		offset = lineEnd + 1
+	}
+	return out
 }
 
 func toProtocolDiagnostics(text string, doc *ppi.Document) []protocol.Diagnostic {
