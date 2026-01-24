@@ -157,6 +157,28 @@ func TestVarDefinitionAt(t *testing.T) {
 	}
 }
 
+func TestVarDefinitionAtSignatureVar(t *testing.T) {
+	src := "sub foo ($app) { $app; }"
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+	idx := IndexDocument(doc)
+	if idx == nil {
+		t.Fatalf("expected index")
+	}
+	useOffset := offsetOf(t, src, "$app;")
+	def, ok := idx.VarDefinitionAt("$app", useOffset)
+	if !ok {
+		t.Fatalf("expected var definition")
+	}
+	defOffset := offsetOf(t, src, "$app)")
+	if def.Start != defOffset {
+		t.Fatalf("expected definition at %d, got %d", defOffset, def.Start)
+	}
+	if def.End != defOffset+len("$app") {
+		t.Fatalf("expected definition end at %d, got %d", defOffset+len("$app"), def.End)
+	}
+}
+
 func TestVariablesAtAnonSignatureVars(t *testing.T) {
 	src := "my $cb = sub ($self, $opt) { $self; $opt };"
 	doc := ppi.NewDocument(src)

@@ -349,7 +349,7 @@ func signatureVarRanges(tokens []ppi.Token, vars []string) map[string]varRange {
 			continue
 		}
 		if idx := strings.Index(protoTok.Value, name); idx >= 0 {
-			start := protoTok.Start + 1 + idx
+			start := protoTok.Start + idx
 			end := start + len(name)
 			out[name] = varRange{start: start, end: end}
 		}
