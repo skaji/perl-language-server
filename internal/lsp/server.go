@@ -610,14 +610,24 @@ func (s *Server) typeDefinition(_ *glsp.Context, params *protocol.TypeDefinition
 		s.logger.Debug("typeDefinition skipped: no token")
 		return nil, nil
 	}
-	if token.Type != ppi.TokenSymbol || len(token.Value) < 2 {
+	var sig string
+	switch token.Type {
+	case ppi.TokenSymbol:
+		if len(token.Value) < 2 {
+			s.logger.Debug("typeDefinition skipped: short symbol", "token", token.Value)
+			return nil, nil
+		}
+		sig = varSigTypeAt(doc, offset, token.Value)
+		if sig == "" {
+			sig = sigArgTypeAt(doc, offset, token.Value)
+		}
+	case ppi.TokenPrototype:
+		if name := prototypeVarAt(token.Value, offset-token.Start); name != "" {
+			sig = sigArgTypeAt(doc, offset, name)
+		}
+	default:
 		s.logger.Debug("typeDefinition skipped: non-symbol token", "token", token.Value, "type", token.Type)
 		return nil, nil
-	}
-
-	sig := varSigTypeAt(doc, offset, token.Value)
-	if sig == "" {
-		sig = sigArgTypeAt(doc, offset, token.Value)
 	}
 	className, ok := classNameFromSig(sig)
 	if !ok {
