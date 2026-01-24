@@ -1,12 +1,18 @@
 package analysis
 
 import (
+	"strconv"
 	"strings"
 
 	ppi "github.com/skaji/go-ppi"
 )
 
 type VarDiagnostic struct {
+	Message string
+	Offset  int
+}
+
+type CallDiagnostic struct {
 	Message string
 	Offset  int
 }
@@ -191,6 +197,181 @@ func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{})
 		})
 	}
 	return diags
+}
+
+// SigCallDiagnostics reports argument count mismatches for calls to subroutines
+// that have a :SIG(...) function signature. This only checks simple calls.
+func SigCallDiagnostics(doc *ppi.Document) []CallDiagnostic {
+	if doc == nil || doc.Root == nil {
+		return nil
+	}
+	var diags []CallDiagnostic
+	tokens := doc.Tokens
+	for i, tok := range tokens {
+		if tok.Type != ppi.TokenWord || tok.Value == "" {
+			continue
+		}
+		name := tok.Value
+		node := findSubNode(doc.Root, name)
+		if node == nil {
+			continue
+		}
+		start, ok := nodeFirstNonTriviaStart(node)
+		if !ok {
+			continue
+		}
+		sig := sigCommentBeforeOffset(doc.Source, start)
+		if sig == "" || !strings.Contains(sig, "->") {
+			continue
+		}
+		args, err := ParseSigArgs(sig)
+		if err != nil {
+			continue
+		}
+		callArgs, ok := parseSimpleCallArgs(tokens, i+1)
+		if !ok {
+			continue
+		}
+		if len(callArgs) != len(args) {
+			msg := "call to " + name + ": expected " + itoa(len(args)) + " args, got " + itoa(len(callArgs))
+			diags = append(diags, CallDiagnostic{Message: msg, Offset: tok.Start})
+		}
+	}
+	return diags
+}
+
+func parseSimpleCallArgs(tokens []ppi.Token, idx int) ([]string, bool) {
+	i := nextNonTrivia(tokens, idx)
+	if i < 0 {
+		return nil, false
+	}
+	if tokens[i].Type != ppi.TokenOperator || tokens[i].Value != "(" {
+		return nil, false
+	}
+	depth := 0
+	var count int
+	var seen bool
+	var invalid bool
+	for j := i; j < len(tokens); j++ {
+		tok := tokens[j]
+		if tok.Type == ppi.TokenOperator {
+			switch tok.Value {
+			case "(":
+				depth++
+			case ")":
+				depth--
+				if depth == 0 {
+					if invalid {
+						return nil, false
+					}
+					if seen {
+						count++
+					}
+					return make([]string, count), true
+				}
+			case ",":
+				if depth == 1 {
+					count++
+				}
+			case "@", "%", "*", "..", "=>":
+				if depth == 1 {
+					invalid = true
+				}
+			}
+		}
+		if depth == 1 && tok.Type == ppi.TokenSymbol {
+			if strings.HasPrefix(tok.Value, "@") || strings.HasPrefix(tok.Value, "%") || strings.HasPrefix(tok.Value, "*") {
+				invalid = true
+			}
+		}
+		if depth == 1 && tok.Type != ppi.TokenWhitespace && tok.Type != ppi.TokenComment && tok.Type != ppi.TokenHereDocContent {
+			seen = true
+		}
+	}
+	return nil, false
+}
+
+func findSubNode(root *ppi.Node, name string) *ppi.Node {
+	var out *ppi.Node
+	walkNodes(root, func(n *ppi.Node) {
+		if out != nil || n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+			return
+		}
+		if n.Name == name {
+			out = n
+		}
+	})
+	return out
+}
+
+func nodeFirstNonTriviaStart(n *ppi.Node) (int, bool) {
+	if n == nil || len(n.Tokens) == 0 {
+		return 0, false
+	}
+	for _, tok := range n.Tokens {
+		switch tok.Type {
+		case ppi.TokenWhitespace, ppi.TokenComment, ppi.TokenHereDocContent:
+			continue
+		default:
+			return tok.Start, true
+		}
+	}
+	return 0, false
+}
+
+func sigCommentBeforeOffset(text string, offset int) string {
+	lineStart, _ := lineBounds(text, offset)
+	if lineStart <= 0 {
+		return ""
+	}
+	prevEnd := lineStart - 1
+	if prevEnd < 0 {
+		return ""
+	}
+	prevStart := 0
+	if idx := strings.LastIndexByte(text[:prevEnd], '\n'); idx >= 0 {
+		prevStart = idx + 1
+	}
+	line := strings.TrimSpace(text[prevStart:prevEnd])
+	if !strings.HasPrefix(line, "#") {
+		return ""
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+	if body, ok := strings.CutPrefix(line, ":SIG"); ok {
+		line = strings.TrimSpace(body)
+	} else if body, ok := strings.CutPrefix(line, "SIG"); ok {
+		line = strings.TrimSpace(body)
+	} else {
+		return ""
+	}
+	open := strings.IndexByte(line, '(')
+	closeIdx := strings.LastIndexByte(line, ')')
+	if open < 0 || closeIdx < open+1 {
+		return ""
+	}
+	return strings.TrimSpace(line[open+1 : closeIdx])
+}
+
+func lineBounds(text string, offset int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(text) {
+		offset = len(text)
+	}
+	start := 0
+	if idx := strings.LastIndexByte(text[:offset], '\n'); idx >= 0 {
+		start = idx + 1
+	}
+	end := len(text)
+	if idx := strings.IndexByte(text[offset:], '\n'); idx >= 0 {
+		end = offset + idx
+	}
+	return start, end
+}
+
+func itoa(n int) string {
+	return strconv.Itoa(n)
 }
 
 func isStrictVersion(version string) bool {

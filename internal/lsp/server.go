@@ -2046,6 +2046,7 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 		diagnostics = toProtocolDiagnostics(doc.text, doc.parsed)
 		diagnostics = append(diagnostics, s.toStrictVarDiagnostics(uri, doc.text, doc.parsed)...)
 		diagnostics = append(diagnostics, sigDiagnostics(doc.text)...)
+		diagnostics = append(diagnostics, toSigCallDiagnostics(doc.text, doc.parsed)...)
 	}
 
 	if context != nil && context.Notify != nil {
@@ -2109,6 +2110,29 @@ func sigDiagnostics(text string) []protocol.Diagnostic {
 			break
 		}
 		offset = lineEnd + 1
+	}
+	return out
+}
+
+func toSigCallDiagnostics(text string, doc *ppi.Document) []protocol.Diagnostic {
+	if doc == nil {
+		return nil
+	}
+	diags := analysis.SigCallDiagnostics(doc)
+	if len(diags) == 0 {
+		return nil
+	}
+	out := make([]protocol.Diagnostic, 0, len(diags))
+	source := "perl-lsp"
+	sev := protocol.DiagnosticSeverityError
+	for _, diag := range diags {
+		rng := diagnosticRange(text, diag.Offset)
+		out = append(out, protocol.Diagnostic{
+			Range:    rng,
+			Severity: &sev,
+			Source:   &source,
+			Message:  diag.Message,
+		})
 	}
 	return out
 }
