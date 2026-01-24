@@ -269,6 +269,12 @@ func hoverVarSigType(doc *documentData, offset int, name string, logger *slog.Lo
 		return ""
 	}
 	sig := varSigTypeAt(doc, offset, name)
+	if sig != "" && strings.Contains(sig, "->") {
+		if arg := sigArgTypeAt(doc, offset, name); arg != "" {
+			return arg
+		}
+		return ""
+	}
 	if sig == "" {
 		sig = sigArgTypeAt(doc, offset, name)
 		if sig == "" {
