@@ -233,8 +233,13 @@ func collectSignatureVars(rootNode *ppi.Node, root *Scope) {
 			if len(n.SubSigParsed) > 0 {
 				addReceiver(scope, n.SubSigParsed[0].Name)
 			}
+			varRanges := signatureVarRanges(n.Tokens, n.SubSigVars)
 			for _, name := range n.SubSigVars {
-				addSigVar(scope, start, name)
+				if rng, ok := varRanges[name]; ok {
+					addSigVarWithRange(scope, rng.start, rng.end, name)
+				} else {
+					addSigVar(scope, start, name)
+				}
 			}
 		}
 	})
@@ -256,6 +261,26 @@ func addSigVar(scope *Scope, start int, name string) {
 		Storage: "my",
 		Start:   start,
 		End:     start,
+	}
+	scope.Symbols = append(scope.Symbols, sym)
+}
+
+func addSigVarWithRange(scope *Scope, start, end int, name string) {
+	if scope == nil {
+		return
+	}
+	if len(name) < 2 {
+		return
+	}
+	if !(strings.HasPrefix(name, "$") || strings.HasPrefix(name, "@") || strings.HasPrefix(name, "%")) {
+		return
+	}
+	sym := Symbol{
+		Name:    name,
+		Kind:    SymbolVar,
+		Storage: "my",
+		Start:   start,
+		End:     end,
 	}
 	scope.Symbols = append(scope.Symbols, sym)
 }
@@ -294,6 +319,42 @@ func signatureVarsFromPrototype(proto string) []string {
 		}
 	}
 	return vars
+}
+
+type varRange struct {
+	start int
+	end   int
+}
+
+func signatureVarRanges(tokens []ppi.Token, vars []string) map[string]varRange {
+	if len(vars) == 0 {
+		return nil
+	}
+	var protoTok *ppi.Token
+	for i := range tokens {
+		if tokens[i].Type == ppi.TokenPrototype {
+			protoTok = &tokens[i]
+			break
+		}
+	}
+	if protoTok == nil {
+		return nil
+	}
+	out := make(map[string]varRange, len(vars))
+	for _, name := range vars {
+		if name == "" {
+			continue
+		}
+		if _, ok := out[name]; ok {
+			continue
+		}
+		if idx := strings.Index(protoTok.Value, name); idx >= 0 {
+			start := protoTok.Start + idx
+			end := start + len(name)
+			out[name] = varRange{start: start, end: end}
+		}
+	}
+	return out
 }
 
 func isWordStart(ch byte) bool {
@@ -347,8 +408,13 @@ func collectAnonSignatureVars(doc *ppi.Document, root *Scope) {
 		if len(sigVars) > 0 {
 			addReceiver(scope, sigVars[0])
 		}
+		varRanges := signatureVarRanges(tokens, sigVars)
 		for _, name := range sigVars {
-			addSigVar(scope, start, name)
+			if rng, ok := varRanges[name]; ok {
+				addSigVarWithRange(scope, rng.start, rng.end, name)
+			} else {
+				addSigVar(scope, start, name)
+			}
 		}
 	}
 }
