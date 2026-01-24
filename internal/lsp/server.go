@@ -715,22 +715,11 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 	}
 
 	offset := params.Position.IndexIn(doc.text)
-	receivers := map[string]struct{}{}
-	if doc.index != nil {
-		if names := doc.index.ReceiverNamesAt(offset); names != nil {
-			receivers = names
-		}
-	}
 	if methodPrefix, start, recv, ok := methodPrefixAt(doc.text, offset); ok {
 		pkg := ""
 		if sig := varTypeSigAt(doc, offset, recv); sig != "" {
 			if class, ok := classNameFromSig(sig); ok {
 				pkg = class
-			}
-		}
-		if pkg == "" {
-			if _, ok := receivers[recv]; ok {
-				pkg = doc.parsed.PackageAt(offset)
 			}
 		}
 		if pkg != "" {
