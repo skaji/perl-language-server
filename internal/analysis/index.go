@@ -23,12 +23,12 @@ type Symbol struct {
 }
 
 type Scope struct {
-	Kind     string
-	Start    int
-	End      int
-	Symbols  []Symbol
-	Children []*Scope
-	Parent   *Scope
+	Kind      string
+	Start     int
+	End       int
+	Symbols   []Symbol
+	Children  []*Scope
+	Parent    *Scope
 	Receivers map[string]struct{}
 }
 
@@ -141,7 +141,7 @@ func collectVariables(doc *ppi.Document, root *Scope) {
 	}
 	activeDecl := false
 	declKind := ""
-	for i := 0; i < len(tokens); i++ {
+	for i := range tokens {
 		tok := tokens[i]
 		if tok.Type == ppi.TokenWord || tok.Type == ppi.TokenAttribute {
 			switch strings.ToLower(tok.Value) {
@@ -260,30 +260,6 @@ func addSigVar(scope *Scope, start int, name string) {
 	scope.Symbols = append(scope.Symbols, sym)
 }
 
-func anonSubSignatureVars(tokens []ppi.Token) []string {
-	if len(tokens) == 0 {
-		return nil
-	}
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
-		if tok.Type != ppi.TokenWord || tok.Value != "sub" {
-			continue
-		}
-		next := nextNonTrivia(tokens, i+1)
-		if next < 0 {
-			continue
-		}
-		if tokens[next].Type == ppi.TokenWord {
-			continue
-		}
-		if tokens[next].Type != ppi.TokenPrototype {
-			continue
-		}
-		return signatureVarsFromPrototype(tokens[next].Value)
-	}
-	return nil
-}
-
 func signatureVarsFromPrototype(proto string) []string {
 	if proto == "" {
 		return nil
@@ -333,7 +309,7 @@ func collectAnonSignatureVars(doc *ppi.Document, root *Scope) {
 		return
 	}
 	tokens := doc.Tokens
-	for i := 0; i < len(tokens); i++ {
+	for i := range tokens {
 		tok := tokens[i]
 		if tok.Type != ppi.TokenWord || tok.Value != "sub" {
 			continue
@@ -356,8 +332,8 @@ func collectAnonSignatureVars(doc *ppi.Document, root *Scope) {
 		if open < 0 {
 			continue
 		}
-		close := matchBrace(tokens, open)
-		if close < 0 {
+		closeIdx := matchBrace(tokens, open)
+		if closeIdx < 0 {
 			continue
 		}
 		start := tokens[open].Start
@@ -433,16 +409,16 @@ func anonSubScopesFromTokens(tokens []ppi.Token) []*Scope {
 		if open < 0 {
 			continue
 		}
-		close := matchBrace(tokens, open)
-		if close < 0 {
+		closeIdx := matchBrace(tokens, open)
+		if closeIdx < 0 {
 			continue
 		}
 		scopes = append(scopes, &Scope{
 			Kind:  "anon_sub",
 			Start: tokens[open].Start,
-			End:   tokens[close].End,
+			End:   tokens[closeIdx].End,
 		})
-		i = close
+		i = closeIdx
 	}
 	return scopes
 }
@@ -503,8 +479,7 @@ func scanReceiverAssignments(tokens []ppi.Token, start, end int) []string {
 	seen := make(map[string]struct{})
 	var out []string
 	semiCount := 0
-	for i := 0; i < len(tokens); i++ {
-		tok := tokens[i]
+	for i, tok := range tokens {
 		if tok.Start < start {
 			continue
 		}
@@ -591,21 +566,21 @@ func matchMyListFromArray(tokens []ppi.Token, idx int) (string, bool) {
 		return "", false
 	}
 	name := ""
-	close := -1
+	closeIdx := -1
 	for i := i2; i < len(tokens); i++ {
 		tok := tokens[i]
 		if tok.Type == ppi.TokenOperator && tok.Value == ")" {
-			close = i
+			closeIdx = i
 			break
 		}
 		if tok.Type == ppi.TokenSymbol && strings.HasPrefix(tok.Value, "$") && name == "" {
 			name = tok.Value
 		}
 	}
-	if name == "" || close < 0 {
+	if name == "" || closeIdx < 0 {
 		return "", false
 	}
-	i4 := nextNonTriviaToken(tokens, close+1)
+	i4 := nextNonTriviaToken(tokens, closeIdx+1)
 	if i4 < 0 || tokens[i4].Type != ppi.TokenOperator || tokens[i4].Value != "=" {
 		return "", false
 	}
@@ -774,12 +749,12 @@ func splitQWNames(value string) []string {
 	}
 	body := value[2:]
 	open := body[0]
-	close := matchingDelimiter(open)
-	if close == 0 {
+	closeDelim := matchingDelimiter(open)
+	if closeDelim == 0 {
 		return nil
 	}
 	content := body[1:]
-	if idx := strings.LastIndexByte(content, close); idx >= 0 {
+	if idx := strings.LastIndexByte(content, closeDelim); idx >= 0 {
 		content = content[:idx]
 	}
 	if content == "" {

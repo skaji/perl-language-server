@@ -197,8 +197,7 @@ func isClassName(s string) bool {
 	if s == "" {
 		return false
 	}
-	parts := strings.Split(s, "::")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(s, "::") {
 		if part == "" {
 			return false
 		}

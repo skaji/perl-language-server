@@ -67,12 +67,12 @@ func splitQW(value string) []string {
 	}
 	body := value[2:]
 	open := body[0]
-	close := matchingDelimiter(open)
+	closeDelim := matchingDelimiter(open)
 	content := body[1:]
-	if close == 0 {
+	if closeDelim == 0 {
 		return nil
 	}
-	if idx := strings.LastIndexByte(content, close); idx >= 0 {
+	if idx := strings.LastIndexByte(content, closeDelim); idx >= 0 {
 		content = content[:idx]
 	}
 	if content == "" {

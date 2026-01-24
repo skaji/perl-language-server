@@ -1,2 +1,10 @@
 /go-ppi
 /_test
+/ETHER
+/EXODIST
+/RJBS
+/.cache
+/.gocache
+/Module-Build
+/ExtUtils-MakeMaker
+/tmp_scan.out

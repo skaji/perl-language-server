@@ -18,7 +18,7 @@ func TestExportedStrictVarsNoImportList(t *testing.T) {
 	srv := newTestServer()
 
 	extra := srv.exportedStrictVars(doc, path)
-	if extra == nil || len(extra) == 0 {
+	if len(extra) == 0 {
 		t.Fatalf("expected extra exports")
 	}
 
@@ -35,7 +35,7 @@ func TestExportedStrictVarsExplicitImportList(t *testing.T) {
 	srv := newTestServer()
 
 	extra := srv.exportedStrictVars(doc, path)
-	if extra == nil || len(extra) == 0 {
+	if len(extra) == 0 {
 		t.Fatalf("expected extra exports")
 	}
 	if _, ok := extra["$FOO"]; !ok {
@@ -77,7 +77,7 @@ func TestExportedStrictVarsExplicitNoSigil(t *testing.T) {
 	srv := newTestServer()
 
 	extra := srv.exportedStrictVars(doc, path)
-	if extra != nil && len(extra) != 0 {
+	if len(extra) != 0 {
 		t.Fatalf("expected no exports, got %v", extra)
 	}
 	diags := analysis.StrictVarDiagnosticsWithExtra(doc, extra)

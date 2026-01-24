@@ -101,15 +101,15 @@ func walkRoot(root string, baseDir string, diags *[]diag, visited map[string]str
 		if d.Type()&os.ModeSymlink != 0 {
 			info, err := os.Stat(path)
 			if err == nil && info.IsDir() {
-				real := path
+				realPath := path
 				if resolved, err := filepath.EvalSymlinks(path); err == nil {
-					real = resolved
+					realPath = resolved
 				}
-				if _, ok := visited[real]; ok {
+				if _, ok := visited[realPath]; ok {
 					return nil
 				}
-				visited[real] = struct{}{}
-				return walkRoot(real, baseDir, diags, visited)
+				visited[realPath] = struct{}{}
+				return walkRoot(realPath, baseDir, diags, visited)
 			}
 		}
 		if d.IsDir() {
@@ -172,9 +172,13 @@ func lineCol(text string, offset int) (int, int) {
 			lastNL = i
 		}
 	}
-	col := offset - lastNL
-	if col < 1 {
-		col = 1
-	}
+	col := maxInt(1, offset-lastNL)
 	return line, col
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

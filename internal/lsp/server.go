@@ -40,17 +40,17 @@ func NewServer(logger *slog.Logger) *Server {
 	}
 	s.logger.Debug("lsp server created", "name", lsName, "version", version)
 	s.handler = protocol.Handler{
-		Initialize:             s.initialize,
-		Initialized:            s.initialized,
-		Shutdown:               s.shutdown,
-		SetTrace:               s.setTrace,
-		TextDocumentDidOpen:    s.didOpen,
-		TextDocumentDidChange:  s.didChange,
-		TextDocumentDidClose:   s.didClose,
-		TextDocumentHover:      s.hover,
-		TextDocumentDefinition: s.definition,
+		Initialize:                 s.initialize,
+		Initialized:                s.initialized,
+		Shutdown:                   s.shutdown,
+		SetTrace:                   s.setTrace,
+		TextDocumentDidOpen:        s.didOpen,
+		TextDocumentDidChange:      s.didChange,
+		TextDocumentDidClose:       s.didClose,
+		TextDocumentHover:          s.hover,
+		TextDocumentDefinition:     s.definition,
 		TextDocumentTypeDefinition: s.typeDefinition,
-		TextDocumentCompletion: s.completion,
+		TextDocumentCompletion:     s.completion,
 	}
 	return s
 }
@@ -465,11 +465,11 @@ func sigCommentBeforeOffset(text string, offset int) string {
 		return ""
 	}
 	open := strings.IndexByte(line, '(')
-	close := strings.LastIndexByte(line, ')')
-	if open < 0 || close < open+1 {
+	closeIdx := strings.LastIndexByte(line, ')')
+	if open < 0 || closeIdx < open+1 {
 		return ""
 	}
-	return strings.TrimSpace(line[open+1 : close])
+	return strings.TrimSpace(line[open+1 : closeIdx])
 }
 
 func lineBounds(text string, offset int) (int, int) {
@@ -488,11 +488,6 @@ func lineBounds(text string, offset int) (int, int) {
 		end = offset + idx
 	}
 	return start, end
-}
-
-func normalizeVarSigType(sig string, varName string) string {
-	_ = varName
-	return strings.TrimSpace(sig)
 }
 
 func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
@@ -1079,19 +1074,19 @@ func sigilsFromQW(value string) []string {
 	}
 	body := value[2:]
 	open := body[0]
-	close := matchingDelimiter(open)
-	if close == 0 {
+	closeDelim := matchingDelimiter(open)
+	if closeDelim == 0 {
 		return nil
 	}
 	content := body[1:]
-	if idx := strings.LastIndexByte(content, close); idx >= 0 {
+	if idx := strings.LastIndexByte(content, closeDelim); idx >= 0 {
 		content = content[:idx]
 	}
 	if content == "" {
 		return nil
 	}
 	var items []string
-	for _, field := range strings.Fields(content) {
+	for field := range strings.FieldsSeq(content) {
 		if len(field) > 1 && (strings.HasPrefix(field, "$") || strings.HasPrefix(field, "@") || strings.HasPrefix(field, "%")) {
 			items = append(items, field)
 		}
@@ -1254,10 +1249,6 @@ func (s *Server) exportedStrictVarsWithBase(doc *ppi.Document, filePath, baseDir
 		return nil
 	}
 	return exports
-}
-
-func (s *Server) moduleSearchPaths(root *ppi.Node, filePath string) []string {
-	return s.moduleSearchPathsWithBase(root, filePath, "")
 }
 
 func (s *Server) moduleSearchPathsWithBase(root *ppi.Node, filePath, baseDir string) []string {
@@ -1648,8 +1639,7 @@ func isClassName(s string) bool {
 	if s == "" {
 		return false
 	}
-	parts := strings.Split(s, "::")
-	for _, part := range parts {
+	for part := range strings.SplitSeq(s, "::") {
 		if part == "" {
 			return false
 		}
@@ -1778,12 +1768,12 @@ func sigDiagnostics(text string) []protocol.Diagnostic {
 		}
 		line := text[lineStart:lineEnd]
 		trim := strings.TrimSpace(line)
-		if strings.HasPrefix(trim, "#") {
-			body := strings.TrimSpace(strings.TrimPrefix(trim, "#"))
+		if body, ok := strings.CutPrefix(trim, "#"); ok {
+			body = strings.TrimSpace(body)
 			if strings.HasPrefix(body, ":SIG") {
 				open := strings.IndexByte(body, '(')
-				close := strings.LastIndexByte(body, ')')
-				if open < 0 || close < open+1 {
+				closeIdx := strings.LastIndexByte(body, ')')
+				if open < 0 || closeIdx < open+1 {
 					out = append(out, protocol.Diagnostic{
 						Range:    protocol.Range{Start: positionFromOffset(text, lineStart), End: positionFromOffset(text, lineEnd)},
 						Severity: &sev,
@@ -1791,7 +1781,7 @@ func sigDiagnostics(text string) []protocol.Diagnostic {
 						Message:  "invalid :SIG(...)",
 					})
 				} else {
-					sig := strings.TrimSpace(body[open+1 : close])
+					sig := strings.TrimSpace(body[open+1 : closeIdx])
 					if err := analysis.ValidateSig(sig); err != nil {
 						out = append(out, protocol.Diagnostic{
 							Range:    protocol.Range{Start: positionFromOffset(text, lineStart), End: positionFromOffset(text, lineEnd)},
