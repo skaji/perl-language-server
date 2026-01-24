@@ -148,39 +148,35 @@ func StrictVarDiagnosticsWithExtra(doc *ppi.Document, extra map[string]struct{})
 			continue
 		}
 		if strings.HasPrefix(tok.Value, "$") && len(tok.Value) > 1 {
-			allowed := []string{"@", "%"}
 			next := nextNonTrivia(doc.Tokens, i+1)
 			if next >= 0 && doc.Tokens[next].Type == ppi.TokenOperator {
 				switch doc.Tokens[next].Value {
 				case "{":
-					allowed = []string{"%"}
+					alt := "%" + tok.Value[1:]
+					if extra != nil {
+						if _, ok := extra[alt]; ok {
+							goto declaredOK
+						}
+					}
+					if isSpecialVar(alt) {
+						goto declaredOK
+					}
+					if _, ok := declared.visible(alt, tok.Start); ok {
+						goto declaredOK
+					}
 				case "[":
-					allowed = []string{"@"}
-				}
-			}
-			if allowed[0] == "%" {
-				alt := "%" + tok.Value[1:]
-				if extra != nil {
-					if _, ok := extra[alt]; ok {
+					alt := "@" + tok.Value[1:]
+					if extra != nil {
+						if _, ok := extra[alt]; ok {
+							goto declaredOK
+						}
+					}
+					if isSpecialVar(alt) {
 						goto declaredOK
 					}
-				}
-				if isSpecialVar(alt) {
-					goto declaredOK
-				}
-			}
-			for _, sigil := range allowed {
-				alt := sigil + tok.Value[1:]
-				if extra != nil {
-					if _, ok := extra[alt]; ok {
+					if _, ok := declared.visible(alt, tok.Start); ok {
 						goto declaredOK
 					}
-				}
-				if isSpecialVar(alt) {
-					goto declaredOK
-				}
-				if _, ok := declared.visible(alt, tok.Start); ok {
-					goto declaredOK
 				}
 			}
 		}

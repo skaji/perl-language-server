@@ -219,6 +219,24 @@ func TestStrictVarsModuloOperator(t *testing.T) {
 	}
 }
 
+func TestStrictVarsScalarArrayHashMismatch(t *testing.T) {
+	src := "use strict; my %hash; my @array; $hash; $array;"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 2 {
+		t.Fatalf("expected 2 diag, got %d", len(diags))
+	}
+}
+
+func TestStrictVarsScalarArrayHashAccess(t *testing.T) {
+	src := "use strict; my %hash; my @array; $hash{a}; $array[1];"
+	doc := parseDoc(src)
+	diags := StrictVarDiagnostics(doc)
+	if len(diags) != 0 {
+		t.Fatalf("expected 0 diag, got %d", len(diags))
+	}
+}
+
 func TestStrictVarsArrayLengthToken(t *testing.T) {
 	src := "use strict; my @script_name; $#script_name;"
 	doc := parseDoc(src)
