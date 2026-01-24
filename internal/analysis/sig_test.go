@@ -54,6 +54,24 @@ func TestParseSigArgs(t *testing.T) {
 	}
 }
 
+func TestParseSigReturn(t *testing.T) {
+	ret, err := ParseSigReturn("(any, int) -> App::Foo")
+	if err != nil {
+		t.Fatalf("ParseSigReturn error: %v", err)
+	}
+	if len(ret) != 1 || ret[0] != "App::Foo" {
+		t.Fatalf("expected App::Foo, got %#v", ret)
+	}
+
+	ret, err = ParseSigReturn("(any, int) -> void")
+	if err != nil {
+		t.Fatalf("ParseSigReturn error: %v", err)
+	}
+	if len(ret) != 0 {
+		t.Fatalf("expected no return, got %#v", ret)
+	}
+}
+
 func TestValidateSigInvalid(t *testing.T) {
 	bad := []string{
 		"",

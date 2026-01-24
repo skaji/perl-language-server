@@ -41,6 +41,20 @@ func ParseSigArgs(sig string) ([]string, error) {
 	return parseTypeList(left, true)
 }
 
+// ParseSigReturn returns return types for a function signature.
+// For "void" it returns an empty slice.
+func ParseSigReturn(sig string) ([]string, error) {
+	s := strings.TrimSpace(sig)
+	if s == "" {
+		return nil, fmt.Errorf("empty signature")
+	}
+	_, right, ok := splitTopLevelArrow(s)
+	if !ok {
+		return nil, fmt.Errorf("not a function signature")
+	}
+	return parseTypeList(right, true)
+}
+
 func splitTopLevelArrow(s string) (string, string, bool) {
 	depthParen := 0
 	depthBracket := 0

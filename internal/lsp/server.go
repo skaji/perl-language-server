@@ -297,6 +297,11 @@ func varTypeSigAt(doc *documentData, offset int, name string) string {
 	if strings.Contains(sig, "->") {
 		return ""
 	}
+	if sig == "" {
+		if inferred := varReturnTypeFromAssignment(doc, offset, name); inferred != "" {
+			return inferred
+		}
+	}
 	return sig
 }
 
@@ -417,6 +422,111 @@ func argIndexFromAssignments(tokens []ppi.Token, start, end, offset int, name st
 		}
 	}
 	return -1, false
+}
+
+func varReturnTypeFromAssignment(doc *documentData, offset int, name string) string {
+	if doc == nil || doc.parsed == nil || doc.index == nil || name == "" {
+		return ""
+	}
+	decl := findVarDeclSymbol(doc.index.VariablesAt(offset), name)
+	if decl == nil {
+		return ""
+	}
+	i := tokenIndexAtOffset(doc.parsed.Tokens, decl.Start)
+	if i < 0 {
+		return ""
+	}
+	startIdx := i
+	if startIdx < 0 {
+		return ""
+	}
+	endIdx := len(doc.parsed.Tokens)
+	for j := startIdx; j < len(doc.parsed.Tokens); j++ {
+		tok := doc.parsed.Tokens[j]
+		if tok.Type == ppi.TokenOperator && tok.Value == ";" {
+			endIdx = j
+			break
+		}
+	}
+	assignIdx := -1
+	for j := startIdx; j < endIdx; j++ {
+		tok := doc.parsed.Tokens[j]
+		if tok.Type == ppi.TokenOperator && tok.Value == "=" {
+			assignIdx = j
+			break
+		}
+	}
+	if assignIdx < 0 {
+		return ""
+	}
+	callName := callNameFromAssignment(doc.parsed.Tokens, assignIdx+1, endIdx)
+	if callName == "" {
+		return ""
+	}
+	return subReturnType(doc, callName)
+}
+
+func callNameFromAssignment(tokens []ppi.Token, start, end int) string {
+	i := nextNonTriviaTokenLocal(tokens, start)
+	if i < 0 || i >= end {
+		return ""
+	}
+	tok := tokens[i]
+	if tok.Type == ppi.TokenWord {
+		if tok.Value == "__PACKAGE__" {
+			i2 := nextNonTriviaTokenLocal(tokens, i+1)
+			if i2 < 0 || i2 >= end {
+				return ""
+			}
+			if tokens[i2].Type != ppi.TokenOperator || tokens[i2].Value != "->" {
+				return ""
+			}
+			i3 := nextNonTriviaTokenLocal(tokens, i2+1)
+			if i3 < 0 || i3 >= end {
+				return ""
+			}
+			if tokens[i3].Type != ppi.TokenWord {
+				return ""
+			}
+			return tokens[i3].Value
+		}
+		return tok.Value
+	}
+	return ""
+}
+
+func subReturnType(doc *documentData, name string) string {
+	if doc == nil || doc.parsed == nil || name == "" {
+		return ""
+	}
+	var sub *ppi.Node
+	walkNodes(doc.parsed.Root, func(n *ppi.Node) {
+		if sub != nil || n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+			return
+		}
+		if n.Name == name {
+			sub = n
+		}
+	})
+	if sub == nil {
+		return ""
+	}
+	start, ok := nodeFirstNonTriviaStart(sub)
+	if !ok {
+		return ""
+	}
+	sig := sigCommentBeforeOffset(doc.text, start)
+	if sig == "" || !strings.Contains(sig, "->") {
+		return ""
+	}
+	ret, err := analysis.ParseSigReturn(sig)
+	if err != nil || len(ret) != 1 {
+		return ""
+	}
+	if class, ok := classNameFromSig(ret[0]); ok {
+		return class
+	}
+	return ""
 }
 
 func parseMyVarList(tokens []ppi.Token, idx int) ([]string, int, bool) {

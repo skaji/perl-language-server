@@ -64,6 +64,32 @@ func TestHoverSigCases(t *testing.T) {
 	}
 }
 
+func TestHoverSigReturnFromCall(t *testing.T) {
+	src := "# :SIG(any -> App::cpm::CLI)\nsub bar {\n}\n\nmy $x = bar(undef);\nmy $y = __PACKAGE__->bar();\nmy $z = __PACKAGE__->bar;\n$x;\n$y;\n$z;\n"
+	idx := newDocumentStore()
+	d := idx.set("file:///test.pl", src, nil)
+	cases := []struct {
+		name   string
+		needle string
+	}{
+		{name: "x", needle: "$x;"},
+		{name: "y", needle: "$y;"},
+		{name: "z", needle: "$z;"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			offset := findIndex(src, tc.needle)
+			if offset < 0 {
+				t.Fatalf("expected %s in source", tc.needle)
+			}
+			sig := hoverVarSigType(d, offset, "$"+tc.name, nil)
+			if sig != "App::cpm::CLI" {
+				t.Fatalf("expected App::cpm::CLI, got %q", sig)
+			}
+		})
+	}
+}
+
 func findIndex(src, needle string) int {
 	for i := 0; i+len(needle) <= len(src); i++ {
 		if src[i:i+len(needle)] == needle {

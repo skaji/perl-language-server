@@ -109,6 +109,51 @@ func TestCompletionMethodSigCases(t *testing.T) {
 	}
 }
 
+func TestCompletionMethodReturnFromCall(t *testing.T) {
+	s, tmp := newServerWithModule(t)
+	src := "# :SIG(any -> App::cpm::CLI)\nsub bar {\n}\n\nmy $x = bar(undef);\nmy $y = __PACKAGE__->bar();\nmy $z = __PACKAGE__->bar;\n$x->\n$y->\n$z->\n"
+	uri := protocol.DocumentUri("file://" + filepath.ToSlash(filepath.Join(tmp, "return.pl")))
+	doc := s.docs.set(string(uri), src, nil)
+	if doc == nil {
+		t.Fatalf("expected document")
+	}
+	cases := []struct {
+		name   string
+		needle string
+	}{
+		{name: "x", needle: "$x->"},
+		{name: "y", needle: "$y->"},
+		{name: "z", needle: "$z->"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			offset := findIndex(src, tc.needle)
+			if offset < 0 {
+				t.Fatalf("expected %s in source", tc.needle)
+			}
+			offset += len(tc.needle)
+			pos := positionFromOffset(src, offset)
+			params := &protocol.CompletionParams{
+				TextDocumentPositionParams: protocol.TextDocumentPositionParams{
+					TextDocument: protocol.TextDocumentIdentifier{URI: uri},
+					Position:     pos,
+				},
+			}
+			got, err := s.completion(nil, params)
+			if err != nil {
+				t.Fatalf("completion error: %v", err)
+			}
+			list, ok := got.(protocol.CompletionList)
+			if !ok {
+				t.Fatalf("expected CompletionList, got %T", got)
+			}
+			if !hasCompletionLabel(list.Items, "bar") {
+				t.Fatalf("expected bar completion, got %v", completionLabels(list.Items))
+			}
+		})
+	}
+}
+
 func newServerWithModule(t *testing.T) (*Server, string) {
 	t.Helper()
 	tmp := t.TempDir()
