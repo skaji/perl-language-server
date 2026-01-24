@@ -221,7 +221,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	node := findStatementForOffset(doc.parsed.Root, offset)
 	content := ""
 	if token.Type == ppi.TokenSymbol {
-		if sigType := hoverVarSigType(doc, tokenIdx, offset); sigType != "" {
+		if sigType := hoverVarSigType(doc, offset, token.Value); sigType != "" {
 			content = "type: " + sigType
 		}
 	}
@@ -247,34 +247,37 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}, nil
 }
 
-func hoverVarSigType(doc *documentData, tokenIdx int, offset int) string {
+func hoverVarSigType(doc *documentData, offset int, name string) string {
 	if doc == nil || doc.parsed == nil || doc.index == nil {
 		return ""
 	}
-	tok := doc.parsed.Tokens[tokenIdx]
-	if tok.Type != ppi.TokenSymbol {
+	if name == "" {
 		return ""
 	}
-	if tok.Value == "" {
-		return ""
-	}
-	switch tok.Value[0] {
+	switch name[0] {
 	case '$', '@', '%':
 	default:
 		return ""
 	}
-	decl := findVarDeclSymbol(doc.index.VariablesAt(offset), tok.Value)
-	if decl == nil {
-		return ""
-	}
-	sig := sigCommentBeforeOffset(doc.text, decl.Start)
+	sig := varSigTypeAt(doc, offset, name)
 	if sig == "" {
 		return ""
 	}
 	if strings.Contains(sig, "->") {
 		return ""
 	}
-	return normalizeVarSigType(sig, tok.Value)
+	return sig
+}
+
+func varSigTypeAt(doc *documentData, offset int, name string) string {
+	if doc == nil || doc.index == nil {
+		return ""
+	}
+	decl := findVarDeclSymbol(doc.index.VariablesAt(offset), name)
+	if decl == nil {
+		return ""
+	}
+	return sigCommentBeforeOffset(doc.text, decl.Start)
 }
 
 func findVarDeclSymbol(vars []analysis.Symbol, name string) *analysis.Symbol {
@@ -339,11 +342,8 @@ func lineBounds(text string, offset int) (int, int) {
 }
 
 func normalizeVarSigType(sig string, varName string) string {
-	s := strings.TrimSpace(sig)
-	if s == "" {
-		return ""
-	}
-	return s
+	_ = varName
+	return strings.TrimSpace(sig)
 }
 
 func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
@@ -439,15 +439,25 @@ func (s *Server) completion(_ *glsp.Context, params *protocol.CompletionParams) 
 			receivers = names
 		}
 	}
-	if methodPrefix, start, recv, ok := methodPrefixForReceivers(doc.text, offset, receivers); ok {
-		pkg := doc.parsed.PackageAt(offset)
-		methods := methodsForPackage(doc.parsed, pkg)
-		items := methodCompletionItems(methods, methodPrefix, doc.text, start, offset)
-		s.logger.Debug("completion resolved", "prefix", methodPrefix, "count", len(items), "method", true, "package", pkg, "receiver", recv)
-		return protocol.CompletionList{
-			IsIncomplete: false,
-			Items:        items,
-		}, nil
+	if methodPrefix, start, recv, ok := methodPrefixAt(doc.text, offset); ok {
+		pkg := ""
+		if _, ok := receivers[recv]; ok {
+			pkg = doc.parsed.PackageAt(offset)
+		} else if sig := varSigTypeAt(doc, offset, recv); sig != "" {
+			if class, ok := classNameFromSig(sig); ok {
+				pkg = class
+			}
+		}
+		if pkg != "" {
+			methods := methodsForPackage(doc.parsed, pkg)
+			methods = append(methods, s.methodsForPackageWorkspace(pkg, params.TextDocument.URI)...)
+			items := methodCompletionItems(methods, methodPrefix, doc.text, start, offset)
+			s.logger.Debug("completion resolved", "prefix", methodPrefix, "count", len(items), "method", true, "package", pkg, "receiver", recv)
+			return protocol.CompletionList{
+				IsIncomplete: false,
+				Items:        items,
+			}, nil
+		}
 	}
 
 	prefix := completionPrefix(doc.text, offset)
@@ -1311,10 +1321,43 @@ func methodsForPackage(doc *ppi.Document, pkg string) []string {
 	return out
 }
 
-func methodPrefixForReceivers(text string, offset int, receivers map[string]struct{}) (string, int, string, bool) {
-	if len(receivers) == 0 {
-		return "", 0, "", false
+func (s *Server) methodsForPackageWorkspace(pkg string, uri protocol.DocumentUri) []string {
+	s.workspaceMu.RLock()
+	index := s.workspaceIndex
+	s.workspaceMu.RUnlock()
+	if index == nil || pkg == "" {
+		return nil
 	}
+	prefix := pkg + "::"
+	seen := make(map[string]struct{})
+	out := []string{}
+	exclude := ""
+	if path, ok := uriToPath(uri); ok {
+		exclude = path
+	}
+	for full, defs := range index.SubsByFull {
+		if !strings.HasPrefix(full, prefix) {
+			continue
+		}
+		for _, def := range defs {
+			if exclude != "" && def.File == exclude {
+				continue
+			}
+			name := strings.TrimPrefix(full, prefix)
+			if name == "" {
+				continue
+			}
+			if _, ok := seen[name]; ok {
+				continue
+			}
+			seen[name] = struct{}{}
+			out = append(out, name)
+		}
+	}
+	return out
+}
+
+func methodPrefixAt(text string, offset int) (string, int, string, bool) {
 	if offset < 0 {
 		offset = 0
 	}
@@ -1351,9 +1394,6 @@ func methodPrefixForReceivers(text string, offset int, receivers map[string]stru
 		return "", 0, "", false
 	}
 	recv := text[j-1 : i]
-	if _, ok := receivers[recv]; !ok {
-		return "", 0, "", false
-	}
 	return prefix, start, recv, true
 }
 
@@ -1362,6 +1402,62 @@ func isMethodChar(ch byte) bool {
 		(ch >= 'A' && ch <= 'Z') ||
 		(ch >= '0' && ch <= '9') ||
 		ch == '_'
+}
+
+func classNameFromSig(sig string) (string, bool) {
+	s := strings.TrimSpace(sig)
+	if s == "" {
+		return "", false
+	}
+	if strings.Contains(s, "->") {
+		return "", false
+	}
+	switch s {
+	case "any", "int", "undef", "void":
+		return "", false
+	}
+	if strings.HasPrefix(s, "array[") || strings.HasPrefix(s, "hash[") {
+		return "", false
+	}
+	if isClassName(s) {
+		return s, true
+	}
+	return "", false
+}
+
+func isClassName(s string) bool {
+	if s == "" {
+		return false
+	}
+	parts := strings.Split(s, "::")
+	for _, part := range parts {
+		if part == "" {
+			return false
+		}
+		if !isIdent(part) {
+			return false
+		}
+	}
+	return true
+}
+
+func isIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		ch := s[i]
+		if i == 0 {
+			if !(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z')) {
+				return false
+			}
+			continue
+		}
+		if !(ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func perlKeywords() []string {
