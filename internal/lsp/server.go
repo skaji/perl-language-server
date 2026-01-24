@@ -318,8 +318,16 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 	if err != nil || len(args) == 0 {
 		return ""
 	}
+	vars := node.SubSigVars
+	if len(vars) == 0 {
+		if node.SubSignature != "" {
+			vars = signatureVarsFromPrototypeLocal(node.SubSignature)
+		} else {
+			vars = signatureVarsFromPrototypeToken(node.Tokens)
+		}
+	}
 	idx := -1
-	for i, v := range node.SubSigVars {
+	for i, v := range vars {
 		if v == name {
 			idx = i
 			break
@@ -336,6 +344,51 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 		return ""
 	}
 	return args[idx]
+}
+
+func signatureVarsFromPrototypeToken(tokens []ppi.Token) []string {
+	for i := range tokens {
+		if tokens[i].Type == ppi.TokenPrototype {
+			return signatureVarsFromPrototypeLocal(tokens[i].Value)
+		}
+	}
+	return nil
+}
+
+func signatureVarsFromPrototypeLocal(proto string) []string {
+	if proto == "" {
+		return nil
+	}
+	if proto[0] != '(' || proto[len(proto)-1] != ')' {
+		return nil
+	}
+	body := strings.TrimSpace(proto[1 : len(proto)-1])
+	if body == "" {
+		return nil
+	}
+	parts := strings.Split(body, ",")
+	var vars []string
+	for _, part := range parts {
+		p := strings.TrimSpace(part)
+		if p == "" {
+			continue
+		}
+		for i := 0; i < len(p); i++ {
+			if p[i] != '$' && p[i] != '@' && p[i] != '%' {
+				continue
+			}
+			j := i + 1
+			for j < len(p) && (isIdentChar(p[j])) {
+				j++
+			}
+			if j == i+1 {
+				continue
+			}
+			vars = append(vars, p[i:j])
+			break
+		}
+	}
+	return vars
 }
 
 func nodeFirstNonTriviaStart(n *ppi.Node) (int, bool) {
