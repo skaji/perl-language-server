@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1662,6 +1663,9 @@ func completionItems(doc *ppi.Document, vars []analysis.Symbol, prefix string, r
 		}
 	})
 
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Label < items[j].Label
+	})
 	return items
 }
 
@@ -1669,6 +1673,7 @@ func methodCompletionItems(methods []string, prefix string, text string, start i
 	if len(methods) == 0 {
 		return nil
 	}
+	sort.Strings(methods)
 	seen := make(map[string]struct{})
 	items := make([]protocol.CompletionItem, 0, len(methods))
 	rng := protocol.Range{
@@ -1692,6 +1697,9 @@ func methodCompletionItems(methods []string, prefix string, text string, start i
 			TextEdit: &protocol.TextEdit{Range: rng, NewText: name},
 		})
 	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Label < items[j].Label
+	})
 	return items
 }
 
