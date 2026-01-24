@@ -326,6 +326,13 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 		}
 	}
 	if idx < 0 || idx >= len(args) {
+		if len(args) > 0 && doc.index != nil {
+			if receivers := doc.index.ReceiverNamesAt(offset); receivers != nil {
+				if _, ok := receivers[name]; ok {
+					return args[0]
+				}
+			}
+		}
 		return ""
 	}
 	return args[idx]
