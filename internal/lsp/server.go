@@ -219,7 +219,15 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}
 
 	node := findStatementForOffset(doc.parsed.Root, offset)
-	content := hoverContentForNode(node)
+	content := ""
+	if token.Type == ppi.TokenSymbol {
+		if sigType := hoverVarSigType(doc, tokenIdx, offset); sigType != "" {
+			content = "type: " + sigType
+		}
+	}
+	if content == "" {
+		content = hoverContentForNode(node)
+	}
 	if content == "" {
 		content = fmt.Sprintf("%s: %s", token.Type, token.Value)
 	}
@@ -237,6 +245,114 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 		},
 		Range: &rng,
 	}, nil
+}
+
+func hoverVarSigType(doc *documentData, tokenIdx int, offset int) string {
+	if doc == nil || doc.parsed == nil || doc.index == nil {
+		return ""
+	}
+	tok := doc.parsed.Tokens[tokenIdx]
+	if tok.Type != ppi.TokenSymbol {
+		return ""
+	}
+	if tok.Value == "" {
+		return ""
+	}
+	switch tok.Value[0] {
+	case '$', '@', '%':
+	default:
+		return ""
+	}
+	decl := findVarDeclSymbol(doc.index.VariablesAt(offset), tok.Value)
+	if decl == nil {
+		return ""
+	}
+	sig := sigCommentBeforeOffset(doc.text, decl.Start)
+	if sig == "" {
+		return ""
+	}
+	if strings.Contains(sig, "->") {
+		return ""
+	}
+	return normalizeVarSigType(sig, tok.Value)
+}
+
+func findVarDeclSymbol(vars []analysis.Symbol, name string) *analysis.Symbol {
+	var best *analysis.Symbol
+	for i := range vars {
+		sym := &vars[i]
+		if sym.Kind != analysis.SymbolVar || sym.Name != name {
+			continue
+		}
+		if best == nil || sym.Start > best.Start {
+			best = sym
+		}
+	}
+	return best
+}
+
+func sigCommentBeforeOffset(text string, offset int) string {
+	lineStart, _ := lineBounds(text, offset)
+	if lineStart <= 0 {
+		return ""
+	}
+	prevEnd := lineStart - 1
+	if prevEnd < 0 {
+		return ""
+	}
+	prevStart := 0
+	if idx := strings.LastIndexByte(text[:prevEnd], '\n'); idx >= 0 {
+		prevStart = idx + 1
+	}
+	line := strings.TrimSpace(text[prevStart:prevEnd])
+	if !strings.HasPrefix(line, "#") {
+		return ""
+	}
+	line = strings.TrimSpace(strings.TrimPrefix(line, "#"))
+	if !strings.HasPrefix(line, ":SIG") {
+		return ""
+	}
+	open := strings.IndexByte(line, '(')
+	close := strings.LastIndexByte(line, ')')
+	if open < 0 || close < open+1 {
+		return ""
+	}
+	return strings.TrimSpace(line[open+1 : close])
+}
+
+func lineBounds(text string, offset int) (int, int) {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(text) {
+		offset = len(text)
+	}
+	start := 0
+	if idx := strings.LastIndexByte(text[:offset], '\n'); idx >= 0 {
+		start = idx + 1
+	}
+	end := len(text)
+	if idx := strings.IndexByte(text[offset:], '\n'); idx >= 0 {
+		end = offset + idx
+	}
+	return start, end
+}
+
+func normalizeVarSigType(sig string, varName string) string {
+	s := strings.TrimSpace(sig)
+	if s == "" {
+		return ""
+	}
+	switch varName[0] {
+	case '$':
+		if strings.HasPrefix(s, "array[") {
+			return "arrayref" + s[len("array"):]
+		}
+		if strings.HasPrefix(s, "hash[") {
+			return "hashref" + s[len("hash"):]
+		}
+	}
+	return s
 }
 
 func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) (any, error) {
