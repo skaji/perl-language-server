@@ -227,6 +227,13 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 			content = "type: " + sigType
 		}
 	}
+	if content == "" && token.Type == ppi.TokenPrototype && node != nil && node.Kind == "statement::sub" {
+		if name := prototypeVarAt(token.Value, offset-token.Start); name != "" {
+			if sigType := sigArgTypeAt(doc, offset, name); sigType != "" {
+				content = "type: " + sigType
+			}
+		}
+	}
 	if content == "" {
 		content = hoverContentForNode(node)
 	}
@@ -337,6 +344,36 @@ func nodeFirstNonTriviaStart(n *ppi.Node) (int, bool) {
 		}
 	}
 	return 0, false
+}
+
+func prototypeVarAt(proto string, rel int) string {
+	if rel < 0 {
+		rel = 0
+	}
+	if rel > len(proto) {
+		rel = len(proto)
+	}
+	// Look for a $var that includes rel position.
+	for i := 0; i < len(proto); i++ {
+		if proto[i] != '$' {
+			continue
+		}
+		j := i + 1
+		for j < len(proto) && (isIdentChar(proto[j])) {
+			j++
+		}
+		if j == i+1 {
+			continue
+		}
+		if rel >= i && rel <= j {
+			return proto[i:j]
+		}
+	}
+	return ""
+}
+
+func isIdentChar(ch byte) bool {
+	return ch == '_' || (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')
 }
 
 func subStatementForOffset(root *ppi.Node, offset int) *ppi.Node {
