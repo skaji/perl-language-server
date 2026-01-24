@@ -49,6 +49,7 @@ func NewServer(logger *slog.Logger) *Server {
 		TextDocumentDidClose:   s.didClose,
 		TextDocumentHover:      s.hover,
 		TextDocumentDefinition: s.definition,
+		TextDocumentTypeDefinition: s.typeDefinition,
 		TextDocumentCompletion: s.completion,
 	}
 	return s
@@ -124,6 +125,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	}
 	capabilities.HoverProvider = true
 	capabilities.DefinitionProvider = true
+	capabilities.TypeDefinitionProvider = true
 	capabilities.CompletionProvider = &protocol.CompletionOptions{
 		TriggerCharacters: []string{"$", "@", "%", ">"},
 	}
@@ -439,6 +441,45 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		Range: locRange,
 	}
 	s.logger.Debug("definition resolved", "name", name, "kind", def.Kind)
+	return []protocol.Location{loc}, nil
+}
+
+func (s *Server) typeDefinition(_ *glsp.Context, params *protocol.TypeDefinitionParams) (any, error) {
+	s.logger.Debug("typeDefinition", "uri", params.TextDocument.URI, "line", params.Position.Line+1, "character", params.Position.Character+1)
+	doc, ok := s.docs.get(string(params.TextDocument.URI))
+	if !ok || doc.parsed == nil {
+		s.logger.Debug("typeDefinition skipped: no document")
+		return nil, nil
+	}
+
+	offset := params.Position.IndexIn(doc.text)
+	tokenIdx := tokenIndexAtOffset(doc.parsed.Tokens, offset)
+	if tokenIdx < 0 {
+		s.logger.Debug("typeDefinition skipped: no token")
+		return nil, nil
+	}
+	token := doc.parsed.Tokens[tokenIdx]
+	if isTriviaToken(token.Type) {
+		s.logger.Debug("typeDefinition skipped: no token")
+		return nil, nil
+	}
+	if token.Type != ppi.TokenSymbol || len(token.Value) < 2 {
+		s.logger.Debug("typeDefinition skipped: non-symbol token", "token", token.Value, "type", token.Type)
+		return nil, nil
+	}
+
+	sig := varSigTypeAt(doc, offset, token.Value)
+	className, ok := classNameFromSig(sig)
+	if !ok {
+		s.logger.Debug("typeDefinition skipped: no class sig", "token", token.Value)
+		return nil, nil
+	}
+	loc, ok := s.moduleFileLocation(className, params.TextDocument.URI)
+	if !ok {
+		s.logger.Debug("typeDefinition not found", "name", className)
+		return nil, nil
+	}
+	s.logger.Debug("typeDefinition resolved", "name", className)
 	return []protocol.Location{loc}, nil
 }
 
@@ -1820,18 +1861,48 @@ func (s *Server) moduleLocation(name string, uri protocol.DocumentUri) (protocol
 		s.logger.Debug("module not found in index", "name", name, "roots", uniqueStrings(roots))
 		return protocol.Location{}, false
 	}
-	path := defs[0].File
-	if path == "" {
+	def := defs[0]
+	if def.File == "" {
 		return protocol.Location{}, false
 	}
-	rng := protocol.Range{
-		Start: protocol.Position{Line: 0, Character: 0},
-		End:   protocol.Position{Line: 0, Character: 0},
+	rng, ok := rangeFromFile(def.File, def.Start, def.End)
+	if !ok {
+		return protocol.Location{}, false
 	}
 	return protocol.Location{
-		URI:   protocol.DocumentUri(fileURI(path)),
+		URI:   protocol.DocumentUri(fileURI(def.File)),
 		Range: rng,
 	}, true
+}
+
+func (s *Server) moduleFileLocation(name string, uri protocol.DocumentUri) (protocol.Location, bool) {
+	s.workspaceMu.RLock()
+	index := s.workspaceIndex
+	s.workspaceMu.RUnlock()
+	if index == nil {
+		s.logger.Debug("module lookup skipped: no index", "name", name)
+		return protocol.Location{}, false
+	}
+	exclude := ""
+	if path, ok := uriToPath(uri); ok {
+		exclude = path
+	}
+	defs := index.FindPackages(name, exclude)
+	if len(defs) == 0 {
+		return protocol.Location{}, false
+	}
+	file := defs[0].File
+	if file == "" {
+		return protocol.Location{}, false
+	}
+	loc := protocol.Location{
+		URI: protocol.DocumentUri(fileURI(file)),
+		Range: protocol.Range{
+			Start: protocol.Position{Line: 0, Character: 0},
+			End:   protocol.Position{Line: 0, Character: 0},
+		},
+	}
+	return loc, true
 }
 
 func mapKeys(m map[string]map[string]struct{}) []string {
