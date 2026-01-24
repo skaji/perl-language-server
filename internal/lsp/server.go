@@ -368,8 +368,26 @@ func (s *Server) definition(_ *glsp.Context, params *protocol.DefinitionParams) 
 		s.logger.Debug("definition skipped: no token")
 		return nil, nil
 	}
-	if token.Type != ppi.TokenWord {
+	if token.Type != ppi.TokenWord && token.Type != ppi.TokenSymbol {
 		s.logger.Debug("definition skipped: non-word token", "token", token.Value, "type", token.Type)
+		return nil, nil
+	}
+
+	if token.Type == ppi.TokenSymbol {
+		if len(token.Value) > 1 && doc.index != nil {
+			if def, ok := doc.index.VarDefinitionAt(token.Value, offset); ok {
+				loc := protocol.Location{
+					URI: params.TextDocument.URI,
+					Range: protocol.Range{
+						Start: positionFromOffset(doc.text, def.Start),
+						End:   positionFromOffset(doc.text, def.End),
+					},
+				}
+				s.logger.Debug("definition resolved (var)", "name", def.Name)
+				return []protocol.Location{loc}, nil
+			}
+		}
+		s.logger.Debug("definition skipped: no var definition", "token", token.Value)
 		return nil, nil
 	}
 

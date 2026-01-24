@@ -72,6 +72,31 @@ func (idx *Index) VariablesAt(offset int) []Symbol {
 	return collectVisibleSymbols(scope, offset)
 }
 
+func (idx *Index) VarDefinitionAt(name string, offset int) (Symbol, bool) {
+	if idx == nil || idx.Root == nil {
+		return Symbol{}, false
+	}
+	scope := scopeForOffset(idx.Root, offset)
+	if scope == nil {
+		return Symbol{}, false
+	}
+	for cur := scope; cur != nil; cur = cur.Parent {
+		for _, sym := range cur.Symbols {
+			if sym.Kind != SymbolVar {
+				continue
+			}
+			if sym.Name != name {
+				continue
+			}
+			if sym.Start > offset {
+				continue
+			}
+			return sym, true
+		}
+	}
+	return Symbol{}, false
+}
+
 func (idx *Index) ReceiverNamesAt(offset int) map[string]struct{} {
 	if idx == nil || idx.Root == nil {
 		return nil
