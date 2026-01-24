@@ -289,8 +289,8 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 	if doc == nil || doc.parsed == nil {
 		return ""
 	}
-	node := findStatementForOffset(doc.parsed.Root, offset)
-	if node == nil || node.Kind != "statement::sub" {
+	node := subStatementForOffset(doc.parsed.Root, offset)
+	if node == nil {
 		return ""
 	}
 	start, _, ok := nodeTokenRange(node)
@@ -316,6 +316,32 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 		return ""
 	}
 	return args[idx]
+}
+
+func subStatementForOffset(root *ppi.Node, offset int) *ppi.Node {
+	if root == nil {
+		return nil
+	}
+	var best *ppi.Node
+	bestRange := 0
+	walkNodes(root, func(n *ppi.Node) {
+		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
+			return
+		}
+		start, end, ok := nodeTokenRange(n)
+		if !ok {
+			return
+		}
+		if offset < start || offset > end {
+			return
+		}
+		rng := end - start
+		if best == nil || rng < bestRange {
+			best = n
+			bestRange = rng
+		}
+	})
+	return best
 }
 
 func findVarDeclSymbol(vars []analysis.Symbol, name string) *analysis.Symbol {
