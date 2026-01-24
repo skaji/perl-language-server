@@ -285,6 +285,9 @@ func parseSimpleCallArgs(tokens []ppi.Token, idx int) ([]string, bool) {
 			}
 		}
 		if depth == 1 && tok.Type != ppi.TokenWhitespace && tok.Type != ppi.TokenComment && tok.Type != ppi.TokenHereDocContent {
+			if tok.Type == ppi.TokenOperator && (tok.Value == "(" || tok.Value == ",") {
+				continue
+			}
 			seen = true
 		}
 	}
