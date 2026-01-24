@@ -369,12 +369,27 @@ func subNodeRange(n *ppi.Node) (int, int, bool) {
 	if n == nil {
 		return 0, 0, false
 	}
+	start, ok := nodeFirstNonTriviaStart(n)
+	if !ok {
+		return 0, 0, false
+	}
 	for _, child := range n.Children {
 		if child != nil && child.Type == ppi.NodeBlock {
-			return nodeTokenRange(child)
+			_, end, ok := nodeTokenRange(child)
+			if !ok {
+				return 0, 0, false
+			}
+			return start, end, true
 		}
 	}
-	return nodeTokenRange(n)
+	endStart, end, ok := nodeTokenRange(n)
+	if !ok {
+		return 0, 0, false
+	}
+	if endStart < start {
+		start = endStart
+	}
+	return start, end, true
 }
 
 func findVarDeclSymbol(vars []analysis.Symbol, name string) *analysis.Symbol {
