@@ -36,6 +36,24 @@ func TestValidateSigFunc(t *testing.T) {
 	}
 }
 
+func TestParseSigArgs(t *testing.T) {
+	args, err := ParseSigArgs("(any, int) -> void")
+	if err != nil {
+		t.Fatalf("ParseSigArgs error: %v", err)
+	}
+	if len(args) != 2 || args[0] != "any" || args[1] != "int" {
+		t.Fatalf("unexpected args: %#v", args)
+	}
+
+	args, err = ParseSigArgs("void -> void")
+	if err != nil {
+		t.Fatalf("ParseSigArgs error: %v", err)
+	}
+	if len(args) != 0 {
+		t.Fatalf("expected no args, got %#v", args)
+	}
+}
+
 func TestValidateSigInvalid(t *testing.T) {
 	bad := []string{
 		"",

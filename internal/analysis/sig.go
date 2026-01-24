@@ -27,6 +27,20 @@ func ValidateSig(sig string) error {
 	return nil
 }
 
+// ParseSigArgs returns argument types for a function signature.
+// For "void" it returns an empty slice.
+func ParseSigArgs(sig string) ([]string, error) {
+	s := strings.TrimSpace(sig)
+	if s == "" {
+		return nil, fmt.Errorf("empty signature")
+	}
+	left, _, ok := splitTopLevelArrow(s)
+	if !ok {
+		return nil, fmt.Errorf("not a function signature")
+	}
+	return parseTypeList(left, true)
+}
+
 func splitTopLevelArrow(s string) (string, string, bool) {
 	depthParen := 0
 	depthBracket := 0
@@ -60,51 +74,59 @@ func splitTopLevelArrow(s string) (string, string, bool) {
 }
 
 func validateArgList(s string) error {
-	return validateTypeList(s, true)
+	_, err := parseTypeList(s, true)
+	return err
 }
 
 func validateRetList(s string) error {
-	return validateTypeList(s, true)
+	_, err := parseTypeList(s, true)
+	return err
 }
 
-func validateTypeList(s string, allowVoid bool) error {
+func parseTypeList(s string, allowVoid bool) ([]string, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return fmt.Errorf("empty list")
+		return nil, fmt.Errorf("empty list")
 	}
 	if s == "void" || s == "(void)" {
 		if !allowVoid {
-			return fmt.Errorf("void not allowed")
+			return nil, fmt.Errorf("void not allowed")
 		}
-		return nil
+		return []string{}, nil
 	}
 	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
 		body := strings.TrimSpace(s[1 : len(s)-1])
 		if body == "" {
-			return fmt.Errorf("empty list")
+			return nil, fmt.Errorf("empty list")
 		}
 		parts := splitTopLevel(body, ',')
 		if len(parts) < 2 {
-			if err := validateType(strings.TrimSpace(body), allowVoid); err != nil {
-				return err
+			item := strings.TrimSpace(body)
+			if err := validateType(item, allowVoid); err != nil {
+				return nil, err
 			}
-			return nil
+			return []string{item}, nil
 		}
+		out := make([]string, 0, len(parts))
 		for _, part := range parts {
 			part = strings.TrimSpace(part)
 			if part == "" {
-				return fmt.Errorf("empty type")
+				return nil, fmt.Errorf("empty type")
 			}
 			if err := validateType(part, allowVoid); err != nil {
-				return err
+				return nil, err
 			}
+			out = append(out, part)
 		}
-		return nil
+		return out, nil
 	}
 	if strings.Contains(s, ",") {
-		return fmt.Errorf("multiple types require parentheses")
+		return nil, fmt.Errorf("multiple types require parentheses")
 	}
-	return validateType(s, allowVoid)
+	if err := validateType(s, allowVoid); err != nil {
+		return nil, err
+	}
+	return []string{s}, nil
 }
 
 func validateType(s string, allowVoid bool) error {

@@ -263,7 +263,10 @@ func hoverVarSigType(doc *documentData, offset int, name string) string {
 	}
 	sig := varSigTypeAt(doc, offset, name)
 	if sig == "" {
-		return ""
+		sig = sigArgTypeAt(doc, offset, name)
+		if sig == "" {
+			return ""
+		}
 	}
 	if strings.Contains(sig, "->") {
 		return ""
@@ -280,6 +283,39 @@ func varSigTypeAt(doc *documentData, offset int, name string) string {
 		return ""
 	}
 	return sigCommentBeforeOffset(doc.text, decl.Start)
+}
+
+func sigArgTypeAt(doc *documentData, offset int, name string) string {
+	if doc == nil || doc.parsed == nil {
+		return ""
+	}
+	node := findStatementForOffset(doc.parsed.Root, offset)
+	if node == nil || node.Kind != "statement::sub" {
+		return ""
+	}
+	start, _, ok := nodeTokenRange(node)
+	if !ok {
+		return ""
+	}
+	sig := sigCommentBeforeOffset(doc.text, start)
+	if sig == "" || !strings.Contains(sig, "->") {
+		return ""
+	}
+	args, err := analysis.ParseSigArgs(sig)
+	if err != nil || len(args) == 0 {
+		return ""
+	}
+	idx := -1
+	for i, v := range node.SubSigVars {
+		if v == name {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 || idx >= len(args) {
+		return ""
+	}
+	return args[idx]
 }
 
 func findVarDeclSymbol(vars []analysis.Symbol, name string) *analysis.Symbol {
@@ -469,6 +505,9 @@ func (s *Server) typeDefinition(_ *glsp.Context, params *protocol.TypeDefinition
 	}
 
 	sig := varSigTypeAt(doc, offset, token.Value)
+	if sig == "" {
+		sig = sigArgTypeAt(doc, offset, token.Value)
+	}
 	className, ok := classNameFromSig(sig)
 	if !ok {
 		s.logger.Debug("typeDefinition skipped: no class sig", "token", token.Value)
