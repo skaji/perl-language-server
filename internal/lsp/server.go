@@ -223,7 +223,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	node := findStatementForOffset(doc.parsed.Root, offset)
 	content := ""
 	if token.Type == ppi.TokenSymbol {
-		if sigType := hoverVarSigType(doc, offset, token.Value); sigType != "" {
+		if sigType := hoverVarSigType(doc, offset, token.Value, s.logger); sigType != "" {
 			content = "type: " + sigType
 		}
 	}
@@ -249,7 +249,7 @@ func (s *Server) hover(_ *glsp.Context, params *protocol.HoverParams) (*protocol
 	}, nil
 }
 
-func hoverVarSigType(doc *documentData, offset int, name string) string {
+func hoverVarSigType(doc *documentData, offset int, name string, logger *slog.Logger) string {
 	if doc == nil || doc.parsed == nil || doc.index == nil {
 		return ""
 	}
@@ -265,11 +265,17 @@ func hoverVarSigType(doc *documentData, offset int, name string) string {
 	if sig == "" {
 		sig = sigArgTypeAt(doc, offset, name)
 		if sig == "" {
+			if logger != nil {
+				logger.Debug("hover sig missing", "name", name)
+			}
 			return ""
 		}
 	}
 	if strings.Contains(sig, "->") {
 		return ""
+	}
+	if logger != nil {
+		logger.Debug("hover sig resolved", "name", name, "sig", sig)
 	}
 	return sig
 }
@@ -293,7 +299,7 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 	if node == nil {
 		return ""
 	}
-	start, _, ok := nodeTokenRange(node)
+	start, ok := nodeFirstNonTriviaStart(node)
 	if !ok {
 		return ""
 	}
@@ -318,6 +324,21 @@ func sigArgTypeAt(doc *documentData, offset int, name string) string {
 	return args[idx]
 }
 
+func nodeFirstNonTriviaStart(n *ppi.Node) (int, bool) {
+	if n == nil || len(n.Tokens) == 0 {
+		return 0, false
+	}
+	for _, tok := range n.Tokens {
+		switch tok.Type {
+		case ppi.TokenWhitespace, ppi.TokenComment, ppi.TokenHereDocContent:
+			continue
+		default:
+			return tok.Start, true
+		}
+	}
+	return 0, false
+}
+
 func subStatementForOffset(root *ppi.Node, offset int) *ppi.Node {
 	if root == nil {
 		return nil
@@ -328,7 +349,7 @@ func subStatementForOffset(root *ppi.Node, offset int) *ppi.Node {
 		if n == nil || n.Type != ppi.NodeStatement || n.Kind != "statement::sub" {
 			return
 		}
-		start, end, ok := nodeTokenRange(n)
+		start, end, ok := subNodeRange(n)
 		if !ok {
 			return
 		}
@@ -342,6 +363,18 @@ func subStatementForOffset(root *ppi.Node, offset int) *ppi.Node {
 		}
 	})
 	return best
+}
+
+func subNodeRange(n *ppi.Node) (int, int, bool) {
+	if n == nil {
+		return 0, 0, false
+	}
+	for _, child := range n.Children {
+		if child != nil && child.Type == ppi.NodeBlock {
+			return nodeTokenRange(child)
+		}
+	}
+	return nodeTokenRange(n)
 }
 
 func findVarDeclSymbol(vars []analysis.Symbol, name string) *analysis.Symbol {
