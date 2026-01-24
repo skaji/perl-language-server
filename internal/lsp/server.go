@@ -343,15 +343,6 @@ func normalizeVarSigType(sig string, varName string) string {
 	if s == "" {
 		return ""
 	}
-	switch varName[0] {
-	case '$':
-		if strings.HasPrefix(s, "array[") {
-			return "arrayref" + s[len("array"):]
-		}
-		if strings.HasPrefix(s, "hash[") {
-			return "hashref" + s[len("hash"):]
-		}
-	}
 	return s
 }
 
