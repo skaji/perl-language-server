@@ -2293,15 +2293,16 @@ func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 		s.logger.Debug("workspace index skipped: no roots")
 		return
 	}
+	started := time.Now()
 	index, err := analysis.BuildWorkspaceIndex(merged)
 	if err != nil {
-		s.logger.Debug("workspace index failed", "error", err)
+		s.logger.Debug("workspace index failed", "error", err, "seconds", time.Since(started).Seconds())
 		return
 	}
 	s.workspaceMu.Lock()
 	s.workspaceIndex = index
 	s.workspaceMu.Unlock()
-	s.logger.Info("workspace index ready", "roots", len(merged), "files", index.Files)
+	s.logger.Info("workspace index ready", "roots", len(merged), "files", index.Files, "seconds", time.Since(started).Seconds())
 }
 
 func workspaceRoots(params *protocol.InitializeParams) []string {
