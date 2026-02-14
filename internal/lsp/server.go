@@ -23,7 +23,9 @@ import (
 	"github.com/tliron/glsp/server"
 )
 
-const lsName = "perl-language-server"
+const (
+	lsName = "perl-language-server"
+)
 
 var version = "0.0.1"
 
@@ -1607,6 +1609,14 @@ func (s *Server) exportedStrictVarsWithBase(doc *ppi.Document, filePath, baseDir
 }
 
 func (s *Server) moduleSearchPathsWithBase(root *ppi.Node, filePath, baseDir string) []string {
+	return s.moduleSearchPathsWithOptions(root, filePath, baseDir, true)
+}
+
+func (s *Server) compileIncludePathsWithBase(root *ppi.Node, filePath, baseDir string) []string {
+	return s.moduleSearchPathsWithOptions(root, filePath, baseDir, false)
+}
+
+func (s *Server) moduleSearchPathsWithOptions(root *ppi.Node, filePath, baseDir string, includePerlINC bool) []string {
 	paths := collectUseLibPathsWithBase(root, filePath, baseDir)
 	base := baseDir
 	if base == "" {
@@ -1614,18 +1624,20 @@ func (s *Server) moduleSearchPathsWithBase(root *ppi.Node, filePath, baseDir str
 	}
 	paths = append(paths, filepath.Join(base, "lib"))
 	paths = append(paths, filepath.Join(base, "local", "lib", "perl5"))
-	s.workspaceMu.RLock()
-	incRoots := append([]string{}, s.incRoots...)
-	s.workspaceMu.RUnlock()
-	if len(incRoots) == 0 {
-		roots, err := perlINCPaths()
-		if err != nil {
-			s.logger.Debug("perl @INC lookup failed", "error", err)
-		} else {
-			incRoots = roots
+	if includePerlINC {
+		s.workspaceMu.RLock()
+		incRoots := append([]string{}, s.incRoots...)
+		s.workspaceMu.RUnlock()
+		if len(incRoots) == 0 {
+			roots, err := perlINCPaths()
+			if err != nil {
+				s.logger.Debug("perl @INC lookup failed", "error", err)
+			} else {
+				incRoots = roots
+			}
 		}
+		paths = append(paths, incRoots...)
 	}
-	paths = append(paths, incRoots...)
 	paths = filterExistingRoots(paths, s.logger)
 	return uniqueStrings(paths)
 }
@@ -2567,12 +2579,13 @@ func (s *Server) compileDiagnosticsForFile(uri protocol.DocumentUri, path string
 	s.compileMu.Unlock()
 	defer cancel()
 
-	paths := s.moduleSearchPathsWithBase(root, path, "")
+	paths := s.compileIncludePathsWithBase(root, path, "")
 	args := make([]string, 0, len(paths)*2+2)
 	for _, p := range paths {
 		args = append(args, "-I", p)
 	}
 	args = append(args, "-c", filepath.Base(path))
+	s.logger.Debug("perl -c command", "cwd", filepath.Dir(path), "cmd", "perl", "args", args)
 
 	cmd := exec.CommandContext(ctx, "perl", args...)
 	cmd.Dir = filepath.Dir(path)
