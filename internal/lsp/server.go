@@ -27,14 +27,13 @@ const (
 	lsName = "perl-language-server"
 )
 
-var version = "0.0.1"
-
 var perlCompileAtLine = regexp.MustCompile(` at (.+?) line ([0-9]+)\b`)
 
 type Server struct {
 	handler protocol.Handler
 	docs    *documentStore
 	logger  *slog.Logger
+	version string
 
 	workspaceMu    sync.RWMutex
 	workspaceRoots []string
@@ -47,14 +46,15 @@ type Server struct {
 	compileCancel      map[string]context.CancelFunc
 }
 
-func NewServer(logger *slog.Logger) *Server {
+func NewServer(logger *slog.Logger, version string) *Server {
 	s := &Server{
 		docs:               newDocumentStore(),
 		logger:             logger,
+		version:            version,
 		compileDiagnostics: make(map[string][]protocol.Diagnostic),
 		compileCancel:      make(map[string]context.CancelFunc),
 	}
-	s.logger.Debug("lsp server created", "name", lsName, "version", version)
+	s.logger.Debug("lsp server created", "name", lsName, "version", s.version)
 	s.handler = protocol.Handler{
 		Initialize:                 s.initialize,
 		Initialized:                s.initialized,
@@ -73,7 +73,7 @@ func NewServer(logger *slog.Logger) *Server {
 }
 
 func (s *Server) RunStdio() error {
-	s.logger.Info("starting stdio server", "name", lsName, "version", version)
+	s.logger.Info("starting stdio server", "name", lsName, "version", s.version)
 	srv := server.NewServer(&s.handler, lsName, false)
 	return srv.RunStdio()
 }
@@ -152,7 +152,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 		Capabilities: capabilities,
 		ServerInfo: &protocol.InitializeResultServerInfo{
 			Name:    lsName,
-			Version: &version,
+			Version: &s.version,
 		},
 	}, nil
 }

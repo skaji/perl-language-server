@@ -10,7 +10,7 @@ import (
 
 func TestCompletionMethodWithoutSigNoMethodKind(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
-	s := NewServer(logger)
+	s := NewServer(logger, "test")
 
 	src := "package App::cpm::CLI;\nsub bar {}\nsub foo { my $app = shift; $app-> }\n"
 	uri := protocol.DocumentUri("file:///test.pl")

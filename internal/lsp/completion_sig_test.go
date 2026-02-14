@@ -170,7 +170,7 @@ func newServerWithModule(t *testing.T) (*Server, string) {
 		t.Fatalf("workspace index: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, &slog.HandlerOptions{}))
-	s := NewServer(logger)
+	s := NewServer(logger, "test")
 	s.workspaceIndex = index
 	return s, tmp
 }
