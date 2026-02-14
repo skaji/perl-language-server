@@ -33,13 +33,14 @@ Dependencies:
   - strict vars diagnostics
   - `:SIG(...)` validation diagnostics
   - signature call diagnostics
-  - `perl -c` diagnostics on save (`source: perl -c`)
+  - `perl -c` diagnostics on open/save (`source: perl -c`)
 - Language features:
   - `textDocument/hover`
   - `textDocument/definition`
   - `textDocument/typeDefinition`
   - `textDocument/completion` (symbols, keywords/builtins, method completion from inferred receiver type)
 - Workspace indexing for `.pm` files to resolve package/sub definitions across workspace/lib paths.
+- Workspace indexing is built asynchronously (initialize is not blocked; latest build wins).
 - Include path policy is split by purpose:
   - Analysis/module lookup uses workspace/lib paths + Perl default `@INC`.
   - `perl -c` execution uses only explicit project paths (`use lib`, `./lib`, `./local/lib/perl5`) and does not re-add Perl default `@INC` via `-I`.

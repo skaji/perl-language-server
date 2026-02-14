@@ -16,7 +16,8 @@ Perl Language Server implemented in Go.
   - strict vars diagnostics
   - `:SIG(...)` validation diagnostics
   - signature call diagnostics
-  - `perl -c` diagnostics on save
+  - `perl -c` diagnostics on open/save
+- Workspace index for cross-file resolution is built asynchronously.
 
 ## Requirements
 
@@ -38,6 +39,12 @@ make build
 ```
 
 The server uses stdio for JSON-RPC.
+
+Show binary version:
+
+```sh
+./perl-language-server --version
+```
 
 ## Logging
 
