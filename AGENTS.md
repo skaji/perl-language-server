@@ -4,7 +4,7 @@ Build a Perl Language Server in Go.
 
 - Parsing/analysis: github.com/skaji/go-ppi
 - LSP framework: github.com/skaji/glsp (fork of github.com/tliron/glsp)
-- Logging: log/slog (DEBUG enables debug logs, LOG_FILE writes logs to a file)
+- Logging: log/slog JSON output (DEBUG enables debug logs, LOG_FILE writes logs to a file)
 
 ## Development Flow
 
@@ -26,23 +26,28 @@ Dependencies:
 ## Implemented So Far
 
 - Minimal LSP server over stdio (`initialize`, `initialized`, `shutdown`, `setTrace`).
-- Document lifecycle with parse cache (`textDocument/didOpen`, `didChange`, `didClose`).
+- Document lifecycle with parse cache (`textDocument/didOpen`, `didChange`, `didClose`, `didSave`).
 - Parsing/analysis wired through go-ppi on open/change.
 - Diagnostics:
   - go-ppi structural diagnostics
   - strict vars diagnostics
   - `:SIG(...)` validation diagnostics
   - signature call diagnostics
+  - `perl -c` diagnostics on save (`source: perl -c`)
 - Language features:
   - `textDocument/hover`
   - `textDocument/definition`
   - `textDocument/typeDefinition`
   - `textDocument/completion` (symbols, keywords/builtins, method completion from inferred receiver type)
 - Workspace indexing for `.pm` files to resolve package/sub definitions across workspace/lib paths.
+- Include path policy is split by purpose:
+  - Analysis/module lookup uses workspace/lib paths + Perl default `@INC`.
+  - `perl -c` execution uses only explicit project paths (`use lib`, `./lib`, `./local/lib/perl5`) and does not re-add Perl default `@INC` via `-I`.
 
 ## Still To Implement
 
 - Prioritize and stabilize next LSP feature set (e.g. references, document symbols, rename, signature help).
+- Add user-configurable switches for external compile diagnostics (`perl -c` enable/timeout).
 - Improve incremental update strategy (currently full-text sync) and performance on large files/workspaces.
 - Expand cross-file/type inference accuracy and edge-case handling.
 - Add more end-to-end LSP integration tests (including workspace and `use lib` resolution scenarios).
