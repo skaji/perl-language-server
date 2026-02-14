@@ -181,6 +181,14 @@ func (s *Server) didOpen(context *glsp.Context, params *protocol.DidOpenTextDocu
 	s.logger.Debug("didOpen", "uri", params.TextDocument.URI, "version", params.TextDocument.Version, "languageId", params.TextDocument.LanguageID)
 	version := toUIntegerPtr(params.TextDocument.Version)
 	doc := s.docs.set(string(params.TextDocument.URI), params.TextDocument.Text, version)
+	if path, ok := uriToPath(params.TextDocument.URI); ok {
+		diagnostics, err := s.compileDiagnosticsForFile(params.TextDocument.URI, path, doc.text, doc.parsed.Root)
+		if err != nil {
+			s.logger.Debug("perl -c on open skipped", "uri", params.TextDocument.URI, "error", err)
+		} else {
+			s.setCompileDiagnostics(string(params.TextDocument.URI), diagnostics)
+		}
+	}
 	s.publishDiagnostics(context, params.TextDocument.URI, doc)
 	s.logger.Debug("document opened", "uri", params.TextDocument.URI, "errors", len(doc.parsed.Errors))
 	return nil
