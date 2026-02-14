@@ -1,16 +1,20 @@
 package lsp
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	ppi "github.com/skaji/go-ppi"
 	"github.com/skaji/perl-language-server/internal/analysis"
@@ -23,6 +27,8 @@ const lsName = "perl-language-server"
 
 var version = "0.0.1"
 
+var perlCompileAtLine = regexp.MustCompile(` at (.+?) line ([0-9]+)\b`)
+
 type Server struct {
 	handler protocol.Handler
 	docs    *documentStore
@@ -33,12 +39,18 @@ type Server struct {
 	incRoots       []string
 	extraRoots     map[string]struct{}
 	workspaceIndex *analysis.WorkspaceIndex
+
+	compileMu          sync.RWMutex
+	compileDiagnostics map[string][]protocol.Diagnostic
+	compileCancel      map[string]context.CancelFunc
 }
 
 func NewServer(logger *slog.Logger) *Server {
 	s := &Server{
-		docs:   newDocumentStore(),
-		logger: logger,
+		docs:               newDocumentStore(),
+		logger:             logger,
+		compileDiagnostics: make(map[string][]protocol.Diagnostic),
+		compileCancel:      make(map[string]context.CancelFunc),
 	}
 	s.logger.Debug("lsp server created", "name", lsName, "version", version)
 	s.handler = protocol.Handler{
@@ -49,6 +61,7 @@ func NewServer(logger *slog.Logger) *Server {
 		TextDocumentDidOpen:        s.didOpen,
 		TextDocumentDidChange:      s.didChange,
 		TextDocumentDidClose:       s.didClose,
+		TextDocumentDidSave:        s.didSave,
 		TextDocumentHover:          s.hover,
 		TextDocumentDefinition:     s.definition,
 		TextDocumentTypeDefinition: s.typeDefinition,
@@ -124,6 +137,7 @@ func (s *Server) initialize(_ *glsp.Context, params *protocol.InitializeParams) 
 	capabilities.TextDocumentSync = &protocol.TextDocumentSyncOptions{
 		OpenClose: &protocol.True,
 		Change:    &syncKind,
+		Save:      &protocol.SaveOptions{IncludeText: &protocol.False},
 	}
 	capabilities.HoverProvider = true
 	capabilities.DefinitionProvider = true
@@ -196,9 +210,45 @@ func (s *Server) didChange(context *glsp.Context, params *protocol.DidChangeText
 
 func (s *Server) didClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
 	s.logger.Debug("didClose", "uri", params.TextDocument.URI)
+	s.cancelCompile(string(params.TextDocument.URI))
+	s.clearCompileDiagnostics(string(params.TextDocument.URI))
 	s.docs.delete(string(params.TextDocument.URI))
 	s.publishDiagnostics(context, params.TextDocument.URI, nil)
 	s.logger.Debug("document closed", "uri", params.TextDocument.URI)
+	return nil
+}
+
+func (s *Server) didSave(context *glsp.Context, params *protocol.DidSaveTextDocumentParams) error {
+	s.logger.Debug("didSave", "uri", params.TextDocument.URI)
+	path, ok := uriToPath(params.TextDocument.URI)
+	if !ok {
+		s.logger.Debug("didSave skipped: non-file uri", "uri", params.TextDocument.URI)
+		return nil
+	}
+	src, err := os.ReadFile(path)
+	if err != nil {
+		s.logger.Debug("didSave skipped: read failed", "uri", params.TextDocument.URI, "error", err)
+		return nil
+	}
+
+	var root *ppi.Node
+	if doc, ok := s.docs.get(string(params.TextDocument.URI)); ok && doc != nil && doc.parsed != nil {
+		root = doc.parsed.Root
+	} else {
+		parsed := parseDocument(string(src))
+		root = parsed.Root
+	}
+	diagnostics, err := s.compileDiagnosticsForFile(params.TextDocument.URI, path, string(src), root)
+	if err != nil {
+		s.logger.Debug("perl -c skipped", "uri", params.TextDocument.URI, "error", err)
+		return nil
+	}
+	s.setCompileDiagnostics(string(params.TextDocument.URI), diagnostics)
+	if doc, ok := s.docs.get(string(params.TextDocument.URI)); ok {
+		s.publishDiagnostics(context, params.TextDocument.URI, doc)
+	} else {
+		s.publishDiagnostics(context, params.TextDocument.URI, nil)
+	}
 	return nil
 }
 
@@ -2048,6 +2098,7 @@ func (s *Server) publishDiagnostics(context *glsp.Context, uri protocol.Document
 		diagnostics = append(diagnostics, sigDiagnostics(doc.text)...)
 		diagnostics = append(diagnostics, toSigCallDiagnostics(doc.text, doc.parsed)...)
 	}
+	diagnostics = append(diagnostics, s.getCompileDiagnostics(string(uri))...)
 
 	if context != nil && context.Notify != nil {
 		context.Notify(protocol.ServerTextDocumentPublishDiagnostics, &protocol.PublishDiagnosticsParams{
@@ -2499,6 +2550,157 @@ func collectUseLibPathsWithDir(root *ppi.Node, dir string) []string {
 		}
 	})
 	return out
+}
+
+func (s *Server) compileDiagnosticsForFile(uri protocol.DocumentUri, path string, text string, root *ppi.Node) ([]protocol.Diagnostic, error) {
+	if path == "" {
+		return nil, fmt.Errorf("empty path")
+	}
+
+	uriKey := string(uri)
+	s.compileMu.Lock()
+	if cancel := s.compileCancel[uriKey]; cancel != nil {
+		cancel()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	s.compileCancel[uriKey] = cancel
+	s.compileMu.Unlock()
+	defer cancel()
+
+	paths := s.moduleSearchPathsWithBase(root, path, "")
+	args := make([]string, 0, len(paths)*2+2)
+	for _, p := range paths {
+		args = append(args, "-I", p)
+	}
+	args = append(args, "-c", filepath.Base(path))
+
+	cmd := exec.CommandContext(ctx, "perl", args...)
+	cmd.Dir = filepath.Dir(path)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if !errors.As(err, &exitErr) {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, err
+		}
+	}
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	return perlCompileDiagnostics(text, path, string(out)), nil
+}
+
+func perlCompileDiagnostics(text string, path string, output string) []protocol.Diagnostic {
+	if output == "" {
+		return nil
+	}
+	cleanPath := filepath.Clean(path)
+	basePath := filepath.Base(cleanPath)
+	lines := strings.Split(output, "\n")
+	source := "perl -c"
+	sev := protocol.DiagnosticSeverityError
+	seen := make(map[string]struct{})
+	out := make([]protocol.Diagnostic, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		m := perlCompileAtLine.FindStringSubmatch(line)
+		if len(m) != 3 {
+			continue
+		}
+		lineNo, err := strconv.Atoi(m[2])
+		if err != nil || lineNo <= 0 {
+			continue
+		}
+		fileName := filepath.Clean(strings.TrimSpace(m[1]))
+		if fileName != cleanPath && fileName != basePath {
+			continue
+		}
+		msg, _, _ := strings.Cut(line, " at ")
+		msg = strings.TrimSpace(msg)
+		if msg == "" {
+			msg = line
+		}
+		key := strconv.Itoa(lineNo) + ":" + msg
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		rng := lineRange(text, lineNo)
+		out = append(out, protocol.Diagnostic{
+			Range:    rng,
+			Severity: &sev,
+			Source:   &source,
+			Message:  msg,
+		})
+	}
+	return out
+}
+
+func lineRange(text string, lineNo int) protocol.Range {
+	if lineNo <= 0 {
+		lineNo = 1
+	}
+	lineStart := 0
+	curLine := 1
+	for i := 0; i < len(text) && curLine < lineNo; i++ {
+		if text[i] == '\n' {
+			curLine++
+			lineStart = i + 1
+		}
+	}
+	lineEnd := len(text)
+	if idx := strings.IndexByte(text[lineStart:], '\n'); idx >= 0 {
+		lineEnd = lineStart + idx
+	}
+	return protocol.Range{
+		Start: positionFromOffset(text, lineStart),
+		End:   positionFromOffset(text, lineEnd),
+	}
+}
+
+func (s *Server) setCompileDiagnostics(uri string, diagnostics []protocol.Diagnostic) {
+	s.compileMu.Lock()
+	defer s.compileMu.Unlock()
+	if len(diagnostics) == 0 {
+		delete(s.compileDiagnostics, uri)
+		return
+	}
+	copied := make([]protocol.Diagnostic, len(diagnostics))
+	copy(copied, diagnostics)
+	s.compileDiagnostics[uri] = copied
+}
+
+func (s *Server) getCompileDiagnostics(uri string) []protocol.Diagnostic {
+	s.compileMu.RLock()
+	defer s.compileMu.RUnlock()
+	diagnostics := s.compileDiagnostics[uri]
+	if len(diagnostics) == 0 {
+		return nil
+	}
+	copied := make([]protocol.Diagnostic, len(diagnostics))
+	copy(copied, diagnostics)
+	return copied
+}
+
+func (s *Server) clearCompileDiagnostics(uri string) {
+	s.compileMu.Lock()
+	defer s.compileMu.Unlock()
+	delete(s.compileDiagnostics, uri)
+}
+
+func (s *Server) cancelCompile(uri string) {
+	s.compileMu.Lock()
+	defer s.compileMu.Unlock()
+	if cancel := s.compileCancel[uri]; cancel != nil {
+		cancel()
+	}
+	delete(s.compileCancel, uri)
 }
 
 func perlINCPaths() ([]string, error) {
