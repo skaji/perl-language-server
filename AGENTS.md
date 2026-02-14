@@ -25,11 +25,25 @@ Dependencies:
 
 ## Implemented So Far
 
-Current LSP skeleton with hover using go-ppi AST.
+- Minimal LSP server over stdio (`initialize`, `initialized`, `shutdown`, `setTrace`).
+- Document lifecycle with parse cache (`textDocument/didOpen`, `didChange`, `didClose`).
+- Parsing/analysis wired through go-ppi on open/change.
+- Diagnostics:
+  - go-ppi structural diagnostics
+  - strict vars diagnostics
+  - `:SIG(...)` validation diagnostics
+  - signature call diagnostics
+- Language features:
+  - `textDocument/hover`
+  - `textDocument/definition`
+  - `textDocument/typeDefinition`
+  - `textDocument/completion` (symbols, keywords/builtins, method completion from inferred receiver type)
+- Workspace indexing for `.pm` files to resolve package/sub definitions across workspace/lib paths.
 
 ## Still To Implement
 
-- Decide initial LSP feature set (hover/definition/completion/etc.).
-- Minimal LSP server skeleton using skaji/glsp.
-- Document lifecycle: open/change/close with parse cache.
-- go-ppi integration for parsing/analysis.
+- Prioritize and stabilize next LSP feature set (e.g. references, document symbols, rename, signature help).
+- Improve incremental update strategy (currently full-text sync) and performance on large files/workspaces.
+- Expand cross-file/type inference accuracy and edge-case handling.
+- Add more end-to-end LSP integration tests (including workspace and `use lib` resolution scenarios).
+- Keep docs (`README.md`) aligned with implemented feature set.
