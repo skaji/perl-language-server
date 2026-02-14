@@ -35,11 +35,13 @@ type Server struct {
 	logger  *slog.Logger
 	version string
 
-	workspaceMu    sync.RWMutex
-	workspaceRoots []string
-	incRoots       []string
-	extraRoots     map[string]struct{}
-	workspaceIndex *analysis.WorkspaceIndex
+	workspaceMu          sync.RWMutex
+	workspaceRoots       []string
+	incRoots             []string
+	extraRoots           map[string]struct{}
+	workspaceIndex       *analysis.WorkspaceIndex
+	workspaceBuildID     uint64
+	workspaceBuildCancel context.CancelFunc
 
 	compileMu          sync.RWMutex
 	compileDiagnostics map[string][]protocol.Diagnostic
@@ -164,6 +166,7 @@ func (s *Server) initialized(_ *glsp.Context, _ *protocol.InitializedParams) err
 
 func (s *Server) shutdown(_ *glsp.Context) error {
 	s.logger.Debug("shutdown request")
+	s.cancelWorkspaceIndexBuild()
 	protocol.SetTraceValue(protocol.TraceValueOff)
 	return nil
 }
@@ -2293,16 +2296,7 @@ func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 		s.logger.Debug("workspace index skipped: no roots")
 		return
 	}
-	started := time.Now()
-	index, err := analysis.BuildWorkspaceIndex(merged)
-	if err != nil {
-		s.logger.Debug("workspace index failed", "error", err, "seconds", time.Since(started).Seconds())
-		return
-	}
-	s.workspaceMu.Lock()
-	s.workspaceIndex = index
-	s.workspaceMu.Unlock()
-	s.logger.Info("workspace index ready", "roots", len(merged), "files", index.Files, "seconds", time.Since(started).Seconds())
+	s.startWorkspaceIndexBuild(merged, "initialize")
 }
 
 func workspaceRoots(params *protocol.InitializeParams) []string {
@@ -2508,15 +2502,58 @@ func (s *Server) ensureUseLibPaths(root *ppi.Node, filePath string) {
 		return
 	}
 	roots = uniqueStrings(roots)
-	index, err := analysis.BuildWorkspaceIndex(roots)
-	if err != nil {
-		s.logger.Debug("workspace index rebuild failed", "error", err)
+	s.startWorkspaceIndexBuild(roots, "use lib")
+}
+
+func (s *Server) startWorkspaceIndexBuild(roots []string, reason string) {
+	if len(roots) == 0 {
 		return
 	}
+	roots = uniqueStrings(roots)
 	s.workspaceMu.Lock()
-	s.workspaceIndex = index
+	if s.workspaceBuildCancel != nil {
+		s.workspaceBuildCancel()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	s.workspaceBuildCancel = cancel
+	s.workspaceBuildID++
+	buildID := s.workspaceBuildID
 	s.workspaceMu.Unlock()
-	s.logger.Info("workspace index rebuilt", "roots", len(roots), "files", index.Files)
+
+	s.logger.Info("workspace index build started", "reason", reason, "roots", len(roots))
+	go func(roots []string, reason string, buildID uint64) {
+		started := time.Now()
+		index, err := analysis.BuildWorkspaceIndex(roots)
+		seconds := time.Since(started).Seconds()
+		if err != nil {
+			if ctx.Err() != nil {
+				s.logger.Debug("workspace index build canceled", "reason", reason, "seconds", seconds)
+				return
+			}
+			s.logger.Debug("workspace index failed", "reason", reason, "error", err, "seconds", seconds)
+			return
+		}
+
+		s.workspaceMu.Lock()
+		if buildID != s.workspaceBuildID || ctx.Err() != nil {
+			s.workspaceMu.Unlock()
+			s.logger.Debug("workspace index result discarded", "reason", reason, "seconds", seconds)
+			return
+		}
+		s.workspaceIndex = index
+		s.workspaceBuildCancel = nil
+		s.workspaceMu.Unlock()
+		s.logger.Info("workspace index ready", "reason", reason, "roots", len(roots), "files", index.Files, "seconds", seconds)
+	}(roots, reason, buildID)
+}
+
+func (s *Server) cancelWorkspaceIndexBuild() {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	if s.workspaceBuildCancel != nil {
+		s.workspaceBuildCancel()
+		s.workspaceBuildCancel = nil
+	}
 }
 
 func collectUseLibPaths(root *ppi.Node, filePath string) []string {
