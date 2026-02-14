@@ -26,7 +26,7 @@ func NewLoggerFromEnv() (*slog.Logger, io.Closer, error) {
 		level = slog.LevelDebug
 	}
 
-	handler := slog.NewTextHandler(writer, &slog.HandlerOptions{
+	handler := slog.NewJSONHandler(writer, &slog.HandlerOptions{
 		Level: level,
 	})
 	logger := slog.New(handler)
