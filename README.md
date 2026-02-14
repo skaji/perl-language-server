@@ -4,19 +4,29 @@ WIP
 
 Perl Language Server implemented in Go.
 
-## Status
+## Features
 
-- textDocument/hover (basic)
-- textDocument/publishDiagnostics (basic structural diagnostics from go-ppi)
-- document sync (full text)
+- Document sync: full text (`didOpen`, `didChange`, `didClose`, `didSave`)
+- Hover: `textDocument/hover`
+- Definition: `textDocument/definition`
+- Type definition: `textDocument/typeDefinition`
+- Completion: `textDocument/completion`
+- Diagnostics:
+  - structural diagnostics from go-ppi
+  - strict vars diagnostics
+  - `:SIG(...)` validation diagnostics
+  - signature call diagnostics
+  - `perl -c` diagnostics on save
 
 ## Requirements
 
-- Go 1.25+
+- Go 1.26+
+- Perl (`perl` command available in `PATH`)
 
 ## Build
 
 ```sh
+git clone --depth=1 https://github.com/skaji/go-ppi.git
 go mod download
 make build
 ```
@@ -33,6 +43,7 @@ The server uses stdio for JSON-RPC.
 
 - `DEBUG=1` enables debug logs
 - `LOG_FILE=/path/to/log` writes logs to that file (otherwise stderr)
+- Output format is JSON (`slog` JSON handler)
 
 Example:
 
