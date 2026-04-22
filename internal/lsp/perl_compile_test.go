@@ -1,6 +1,11 @@
 package lsp
 
 import (
+	"io"
+	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
 	"testing"
 )
 
@@ -32,5 +37,28 @@ func TestPerlCompileDiagnosticsIgnoresOtherFiles(t *testing.T) {
 	diags := perlCompileDiagnostics(src, "/tmp/test.pl", out)
 	if len(diags) != 0 {
 		t.Fatalf("expected 0 diagnostics, got %d", len(diags))
+	}
+}
+
+func TestCompileIncludePathsIncludesWorkspaceRoots(t *testing.T) {
+	tmp := t.TempDir()
+	workspaceLib := filepath.Join(tmp, "lib")
+	if err := os.MkdirAll(workspaceLib, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	s := NewServer(logger, "test")
+	s.workspaceRoots = []string{workspaceLib}
+
+	filePath := filepath.Join(tmp, "lib", "App", "cpm", "Builder", "EUMM.pm")
+	paths := s.compileIncludePathsWithBase(nil, filePath, "")
+	if !slices.Contains(paths, workspaceLib) {
+		t.Fatalf("expected compile include paths to contain workspace lib %q, got %#v", workspaceLib, paths)
+	}
+
+	fileLocalLib := filepath.Join(filepath.Dir(filePath), "lib")
+	if slices.Contains(paths, fileLocalLib) {
+		t.Fatalf("expected compile include paths not to contain file-local lib %q, got %#v", fileLocalLib, paths)
 	}
 }

@@ -1629,12 +1629,10 @@ func (s *Server) compileIncludePathsWithBase(root *ppi.Node, filePath, baseDir s
 
 func (s *Server) moduleSearchPathsWithOptions(root *ppi.Node, filePath, baseDir string, includePerlINC bool) []string {
 	paths := collectUseLibPathsWithBase(root, filePath, baseDir)
-	base := baseDir
-	if base == "" {
-		base = filepath.Dir(filePath)
-	}
-	paths = append(paths, filepath.Join(base, "lib"))
-	paths = append(paths, filepath.Join(base, "local", "lib", "perl5"))
+	s.workspaceMu.RLock()
+	workspaceRoots := append([]string{}, s.workspaceRoots...)
+	s.workspaceMu.RUnlock()
+	paths = append(paths, workspaceRoots...)
 	if includePerlINC {
 		s.workspaceMu.RLock()
 		incRoots := append([]string{}, s.incRoots...)

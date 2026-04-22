@@ -120,6 +120,7 @@ func parseFile(t *testing.T, path string) *ppi.Document {
 func newTestServer() *Server {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	srv := NewServer(logger, "test")
+	srv.workspaceRoots = []string{filepath.Join("testdata", "exports", "lib")}
 	srv.incRoots = []string{filepath.Join(string(filepath.Separator), "nonexistent")}
 	return srv
 }
