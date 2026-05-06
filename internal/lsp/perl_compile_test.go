@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"testing"
+
+	ppi "github.com/skaji/go-ppi"
 )
 
 func TestPerlCompileDiagnostics(t *testing.T) {
@@ -60,5 +62,55 @@ func TestCompileIncludePathsIncludesWorkspaceRoots(t *testing.T) {
 	fileLocalLib := filepath.Join(filepath.Dir(filePath), "lib")
 	if slices.Contains(paths, fileLocalLib) {
 		t.Fatalf("expected compile include paths not to contain file-local lib %q, got %#v", fileLocalLib, paths)
+	}
+}
+
+func TestUseLibPathsResolveAgainstWorkspaceRoot(t *testing.T) {
+	root := t.TempDir()
+	xtLib := filepath.Join(root, "xt", "lib")
+	src := `use lib "xt/lib";`
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+
+	srv := newTestServer()
+	srv.projectRoots = []string{root}
+	path := filepath.Join(root, "xt", "41_issue.t")
+
+	got := collectUseLibPathsWithBase(doc.Root, path, srv.projectBaseForFile(path))
+	if len(got) != 1 {
+		t.Fatalf("expected 1 use lib path, got %d: %v", len(got), got)
+	}
+	if got[0] != xtLib {
+		t.Fatalf("expected %q, got %q", xtLib, got[0])
+	}
+}
+
+func TestCompileIncludePathsUseWorkspaceRootBase(t *testing.T) {
+	root := t.TempDir()
+	lib := filepath.Join(root, "lib")
+	xtLib := filepath.Join(root, "xt", "lib")
+	for _, dir := range []string{lib, xtLib} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+	}
+	src := `use lib "xt/lib";`
+	doc := ppi.NewDocument(src)
+	doc.ParseWithDiagnostics()
+
+	srv := newTestServer()
+	srv.projectRoots = []string{root}
+	srv.workspaceRoots = []string{lib}
+	path := filepath.Join(root, "xt", "41_issue.t")
+
+	got := srv.compileIncludePathsWithBase(doc.Root, path, "")
+	want := []string{xtLib, lib}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %v, got %v", want, got)
+		}
 	}
 }

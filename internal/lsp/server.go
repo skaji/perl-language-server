@@ -36,6 +36,7 @@ type Server struct {
 	version string
 
 	workspaceMu          sync.RWMutex
+	projectRoots         []string
 	workspaceRoots       []string
 	incRoots             []string
 	extraRoots           map[string]struct{}
@@ -1628,7 +1629,11 @@ func (s *Server) compileIncludePathsWithBase(root *ppi.Node, filePath, baseDir s
 }
 
 func (s *Server) moduleSearchPathsWithOptions(root *ppi.Node, filePath, baseDir string, includePerlINC bool) []string {
-	paths := collectUseLibPathsWithBase(root, filePath, baseDir)
+	base := baseDir
+	if base == "" {
+		base = s.projectBaseForFile(filePath)
+	}
+	paths := collectUseLibPathsWithBase(root, filePath, base)
 	s.workspaceMu.RLock()
 	workspaceRoots := append([]string{}, s.workspaceRoots...)
 	s.workspaceMu.RUnlock()
@@ -2290,6 +2295,7 @@ func (s *Server) initWorkspaceIndex(params *protocol.InitializeParams) {
 	}
 
 	s.workspaceMu.Lock()
+	s.projectRoots = roots
 	s.workspaceRoots = baseRoots
 	s.incRoots = incRoots
 	if s.extraRoots == nil {
@@ -2478,7 +2484,7 @@ func packageCounts(index *analysis.WorkspaceIndex, imports map[string]map[string
 }
 
 func (s *Server) ensureUseLibPaths(root *ppi.Node, filePath string) {
-	paths := filterExistingRoots(collectUseLibPaths(root, filePath), s.logger)
+	paths := filterExistingRoots(collectUseLibPathsWithBase(root, filePath, s.projectBaseForFile(filePath)), s.logger)
 	if len(paths) == 0 {
 		return
 	}
@@ -2562,14 +2568,6 @@ func (s *Server) cancelWorkspaceIndexBuild() {
 	}
 }
 
-func collectUseLibPaths(root *ppi.Node, filePath string) []string {
-	if root == nil {
-		return nil
-	}
-	dir := filepath.Dir(filePath)
-	return collectUseLibPathsWithDir(root, dir)
-}
-
 func collectUseLibPathsWithBase(root *ppi.Node, filePath, baseDir string) []string {
 	if root == nil {
 		return nil
@@ -2606,6 +2604,35 @@ func collectUseLibPathsWithDir(root *ppi.Node, dir string) []string {
 		}
 	})
 	return out
+}
+
+func (s *Server) projectBaseForFile(filePath string) string {
+	if filePath == "" {
+		return ""
+	}
+	filePath = filepath.Clean(filePath)
+	fallback := filepath.Dir(filePath)
+
+	s.workspaceMu.RLock()
+	roots := append([]string{}, s.projectRoots...)
+	s.workspaceMu.RUnlock()
+
+	var best string
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		if root == "" {
+			continue
+		}
+		if filePath == root || strings.HasPrefix(filePath, root+string(os.PathSeparator)) {
+			if len(root) > len(best) {
+				best = root
+			}
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return fallback
 }
 
 func (s *Server) compileDiagnosticsForFile(uri protocol.DocumentUri, path string, text string, root *ppi.Node) ([]protocol.Diagnostic, error) {
